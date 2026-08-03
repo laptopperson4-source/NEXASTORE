@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Search, Star, X, ArrowLeft, ShieldCheck, ShieldAlert, Sparkles, Users, Loader2, Inbox, Send,
   LayoutDashboard, Package, BarChart3, Settings, Plus, Pencil, Trash2,
-  Rocket, EyeOff, Check, TrendingUp, Download, MessageSquare, ThumbsUp, ThumbsDown
+  Rocket, EyeOff, Check, TrendingUp, Download, MessageSquare, ThumbsUp, ThumbsDown, Key, Copy
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -295,6 +295,20 @@ function ScanBadge({ status }) {
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 w-fit" style={{ background: styles.background, color: styles.color }}>
     {status === "flagged" ? <ShieldAlert size={11} /> : status === "pending" ? <Loader2 size={11} className="animate-spin" /> : <ShieldCheck size={11} />} {styles.label}
   </span>;
+}
+
+/* ---------------------------------------------------------
+   AI API key generation — client-side SHA-256, only the hash
+   is ever sent to the server; the plaintext key is shown once.
+--------------------------------------------------------- */
+async function sha256Hex(input) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomApiKey() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `nxs_live_${b64}`;
 }
 
 function AppCard({ app, onOpen }) {
@@ -1167,8 +1181,100 @@ function Dashboard({ apps, isOwner }) {
 }
 
 /* ---------------------------------------------------------
-   Main console
+   AI API keys panel (owner only)
 --------------------------------------------------------- */
+function AiKeysPanel({ session }) {
+  const [keys, setKeys] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [label, setLabel] = useState("");
+  const [newKey, setNewKey] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const rows = await sbSelect("ai_api_keys", "select=*&order=created_at.desc", session.access_token);
+    setKeys(rows);
+    setLoading(false);
+  }, [session]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const generate = async () => {
+    const key = randomApiKey();
+    const hash = await sha256Hex(key);
+    await sbInsert("ai_api_keys", { label: label.trim() || "AI publisher key", key_hash: hash }, session.access_token);
+    setNewKey(key);
+    setLabel("");
+    await refresh();
+  };
+
+  const revoke = async (id) => {
+    await sbUpdate("ai_api_keys", `id=eq.${id}`, { revoked: true }, session.access_token);
+    await refresh();
+  };
+
+  const copyKey = () => {
+    navigator.clipboard.writeText(newKey).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="text-xl font-semibold text-gray-900 mb-1">AI publishing keys</h2>
+      <p className="text-sm text-gray-500 mb-6">
+        Hand one of these to any AI agent (a Claude session, a script) instead of an email/password —
+        it's all they need to submit apps straight into your review queue. See <code>docs/AI_PUBLISHING.md</code> for the exact calls.
+      </p>
+
+      {newKey && (
+        <div className="mb-6 p-4 rounded-xl border" style={{ background: "#EDE7FF", borderColor: "#D8CCFF" }}>
+          <p className="text-sm font-medium text-gray-900 mb-1">Copy this now — it won't be shown again</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs bg-white px-3 py-2 rounded-lg border border-gray-200 overflow-x-auto whitespace-nowrap">{newKey}</code>
+            <button onClick={copyKey} className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium text-white shrink-0" style={{ background: "#7C4DFF" }}>
+              <Copy size={12} /> {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <button onClick={() => setNewKey(null)} className="text-xs text-gray-500 mt-2">Done, dismiss this</button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 mb-6">
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Claude Code, weekend project)"
+          className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
+        <button onClick={generate} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white shrink-0" style={{ background: "#01875F" }}>
+          <Key size={14} /> Generate key
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-gray-400 flex items-center gap-1.5"><Loader2 size={14} className="animate-spin" /> Loading keys…</p>
+      ) : keys.length === 0 ? (
+        <p className="text-sm text-gray-400">No keys yet — generate one above to let an AI agent publish apps.</p>
+      ) : (
+        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          {keys.map((k) => (
+            <div key={k.id} className="flex items-center justify-between px-4 py-3 border-b border-gray-50 last:border-0">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{k.label}</p>
+                <p className="text-xs text-gray-400">
+                  Created {new Date(k.created_at).toLocaleDateString()}
+                  {k.last_used_at ? ` · last used ${new Date(k.last_used_at).toLocaleDateString()}` : " · never used"}
+                </p>
+              </div>
+              {k.revoked ? (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Revoked</span>
+              ) : (
+                <button onClick={() => revoke(k.id)} className="text-xs font-medium px-3 py-1 rounded-full border border-red-100 text-red-600">Revoke</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function DevConsole({ session, profile, onBackToStore }) {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1285,6 +1391,7 @@ function DevConsole({ session, profile, onBackToStore }) {
         </div>
         <NavItem icon={LayoutDashboard} label="Dashboard" active={view === "dashboard"} onClick={() => { setView("dashboard"); setActiveApp(null); }} />
         <NavItem icon={Package} label={isOwner ? "Review queue" : "My apps"} active={view === "apps" || view === "form" || view === "stats"} onClick={() => { setView("apps"); setActiveApp(null); }} />
+        {isOwner && <NavItem icon={Key} label="AI keys" active={view === "aikeys"} onClick={() => { setView("aikeys"); setActiveApp(null); }} />}
         <NavItem icon={BarChart3} label="Statistics" active={false} onClick={() => flash("Per-app stats live inside each app")} />
         <NavItem icon={Settings} label="Settings" active={false} onClick={() => flash("Nothing to configure yet")} />
         <div className="flex-1" />
@@ -1304,6 +1411,8 @@ function DevConsole({ session, profile, onBackToStore }) {
           <Dashboard apps={apps} isOwner={isOwner} />
         ) : view === "apps" ? (
           <AllApps apps={apps} isOwner={isOwner} onCreate={openCreate} onOpen={openStats} onDelete={handleDelete} onApprove={handleApprove} onReject={handleReject} />
+        ) : view === "aikeys" && isOwner ? (
+          <AiKeysPanel session={session} />
         ) : view === "form" ? (
           <AppForm initial={activeApp ? { ...activeApp, shortDescription: activeApp.shortDescription, releaseNotes: activeApp.releaseNotes } : emptyForm()}
             onCancel={() => { setView(activeApp ? "stats" : "apps"); }} onSave={handleSave} />
