@@ -152,16 +152,22 @@ async function authUpdatePassword(token, newPassword) {
   return data;
 }
 
-// Standalone build: session persistence uses plain localStorage.
+// Standalone build: "Remember me" checked -> localStorage (survives
+// browser restarts). Unchecked -> sessionStorage (cleared when the tab
+// or browser closes).
 const SESSION_KEY = "nexastore-auth-session";
 async function loadStoredSession() {
-  try { const raw = window.localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; }
-  catch { return null; }
-}
-async function saveStoredSession(session) {
   try {
-    if (session) window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    else window.localStorage.removeItem(SESSION_KEY);
+    const raw = window.sessionStorage.getItem(SESSION_KEY) || window.localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+async function saveStoredSession(session, remember = false) {
+  try { window.sessionStorage.removeItem(SESSION_KEY); window.localStorage.removeItem(SESSION_KEY); } catch {}
+  if (!session) return;
+  try {
+    if (remember) window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    else window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {}
 }
 
@@ -392,6 +398,7 @@ function AuthModal({ onClose, onSignIn, onSignUp }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -399,8 +406,8 @@ function AuthModal({ onClose, onSignIn, onSignUp }) {
   const submit = async () => {
     setErr(""); setNotice(""); setBusy(true);
     try {
-      if (mode === "signin") await onSignIn(email, password);
-      else await onSignUp(email, password);
+      if (mode === "signin") await onSignIn(email, password, remember);
+      else await onSignUp(email, password, remember);
       onClose();
     } catch (e) {
       setErr(e.message);
@@ -423,7 +430,11 @@ function AuthModal({ onClose, onSignIn, onSignUp }) {
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email"
           className="w-full mb-2 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
         <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password"
-          className="w-full mb-3 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
+          className="w-full mb-2 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
+        <label className="flex items-center gap-2 mb-3 text-xs text-gray-600 select-none cursor-pointer">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="rounded border-gray-300" style={{ accentColor: "#01875F" }} />
+          Remember me on this device
+        </label>
         {err && <p className="text-xs mb-2" style={{ color: "#C5221F" }}>{err}</p>}
         {notice && <p className="text-xs mb-2" style={{ color: "#01875F" }}>{notice}</p>}
         <button onClick={submit} disabled={busy || !email || !password}
@@ -999,7 +1010,7 @@ function AppForm({ initial, onCancel, onSave }) {
 /* ---------------------------------------------------------
    App detail / statistics page (console side)
 --------------------------------------------------------- */
-function AppStatsPage({ app, isOwner, onBack, onEdit, onDelete, onApprove, onReject, onRescan, onOverrideScan }) {
+function AppStatsPage({ app, isOwner, profile, onBack, onEdit, onDelete, onApprove, onReject, onRescan, onOverrideScan }) {
   const series = useMemo(() => buildInstallSeries(app), [app]);
   const [reviews, setReviews] = useState([]);
   useEffect(() => {
@@ -1034,7 +1045,7 @@ function AppStatsPage({ app, isOwner, onBack, onEdit, onDelete, onApprove, onRej
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!isOwner && app.status !== "approved" && (
+          {app.devId === profile.id && app.status !== "approved" && (
             <>
               <button onClick={() => onEdit(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-gray-200 text-gray-700"><Pencil size={13} /> Edit</button>
               <button onClick={() => onDelete(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-red-100 text-red-600"><Trash2 size={13} /> Delete</button>
@@ -1123,7 +1134,7 @@ function AppStatsPage({ app, isOwner, onBack, onEdit, onDelete, onApprove, onRej
 /* ---------------------------------------------------------
    All apps list
 --------------------------------------------------------- */
-function AllApps({ apps, isOwner, onCreate, onOpen, onDelete, onApprove, onReject }) {
+function AllApps({ apps, isOwner, profile, onCreate, onOpen, onDelete, onApprove, onReject }) {
   const [query, setQuery] = useState("");
   const filtered = apps.filter((a) => a.name.toLowerCase().includes(query.toLowerCase()));
 
@@ -1135,11 +1146,9 @@ function AllApps({ apps, isOwner, onCreate, onOpen, onDelete, onApprove, onRejec
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={isOwner ? "Search all apps" : "Search your apps"}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
         </div>
-        {!isOwner && (
-          <button onClick={onCreate} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white" style={{ background: "#01875F" }}>
-            <Plus size={15} /> Submit app
-          </button>
-        )}
+        <button onClick={onCreate} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white shrink-0" style={{ background: "#01875F" }}>
+          <Plus size={15} /> Submit app
+        </button>
       </div>
 
       {filtered.length === 0 ? (
@@ -1182,7 +1191,7 @@ function AllApps({ apps, isOwner, onCreate, onOpen, onDelete, onApprove, onRejec
                   <td className="py-2.5 px-4 text-gray-600">{formatInstallsShort(a.installs || 0)}</td>
                   <td className="py-2.5 px-4">
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      {!isOwner && a.status !== "approved" && (
+                      {a.devId === profile.id && a.status !== "approved" && (
                         <button onClick={() => onDelete(a)} title="Delete" className="text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
                       )}
                       {isOwner && a.status === "pending" && (
@@ -1476,14 +1485,14 @@ function DevConsole({ session, profile, onBackToStore }) {
         ) : view === "dashboard" ? (
           <Dashboard apps={apps} isOwner={isOwner} />
         ) : view === "apps" ? (
-          <AllApps apps={apps} isOwner={isOwner} onCreate={openCreate} onOpen={openStats} onDelete={handleDelete} onApprove={handleApprove} onReject={handleReject} />
+          <AllApps apps={apps} isOwner={isOwner} profile={profile} onCreate={openCreate} onOpen={openStats} onDelete={handleDelete} onApprove={handleApprove} onReject={handleReject} />
         ) : view === "aikeys" && isOwner ? (
           <AiKeysPanel session={session} />
         ) : view === "form" ? (
           <AppForm initial={activeApp ? { ...activeApp, shortDescription: activeApp.shortDescription, releaseNotes: activeApp.releaseNotes } : emptyForm()}
             onCancel={() => { setView(activeApp ? "stats" : "apps"); }} onSave={handleSave} />
         ) : view === "stats" && activeApp ? (
-          <AppStatsPage app={apps.find((a) => a.id === activeApp.id) || activeApp} isOwner={isOwner}
+          <AppStatsPage app={apps.find((a) => a.id === activeApp.id) || activeApp} isOwner={isOwner} profile={profile}
             onBack={() => { setView("apps"); setActiveApp(null); }} onEdit={openEdit} onDelete={handleDelete}
             onApprove={handleApprove} onReject={handleReject} onRescan={handleRescan} onOverrideScan={handleOverrideScan} />
         ) : null}
@@ -1534,18 +1543,18 @@ export default function NexaStoreApp() {
     setProfile(rows[0] || null);
   };
 
-  const doSignIn = async (email, password) => {
+  const doSignIn = async (email, password, remember) => {
     const data = await authSignIn(email, password);
-    await saveStoredSession(data);
+    await saveStoredSession(data, remember);
     setSession(data);
     await loadProfileFor(data.user.id, data.access_token);
     if (pendingConsole) { setView("console"); setPendingConsole(false); }
   };
 
-  const doSignUp = async (email, password) => {
+  const doSignUp = async (email, password, remember) => {
     const data = await authSignUp(email, password);
     if (data.access_token) {
-      await saveStoredSession(data);
+      await saveStoredSession(data, remember);
       setSession(data);
       await new Promise((r) => setTimeout(r, 500));
       await loadProfileFor(data.user.id, data.access_token);
