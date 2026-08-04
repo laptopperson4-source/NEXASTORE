@@ -141,6 +141,16 @@ async function authRefresh(refreshToken) {
 async function authSignOut(token) {
   try { await fetch(`${AUTHAPI}/logout`, { method: "POST", headers: hdrs(token) }); } catch {}
 }
+async function authUpdatePassword(token, newPassword) {
+  const res = await fetch(`${AUTHAPI}/user`, {
+    method: "PUT",
+    headers: hdrs(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ password: newPassword }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.msg || data.error_description || data.message || "Couldn't update password");
+  return data;
+}
 
 // Standalone build: session persistence uses plain localStorage.
 const SESSION_KEY = "nexastore-auth-session";
@@ -428,7 +438,60 @@ function AuthModal({ onClose, onSignIn, onSignUp }) {
   );
 }
 
-function HeaderAuth({ session, profile, onOpenAuth, onOpenConsole, onSignOut }) {
+function ChangePasswordModal({ session, onClose }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setErr("");
+    if (password.length < 6) { setErr("Password needs to be at least 6 characters."); return; }
+    if (password !== confirm) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    try {
+      await authUpdatePassword(session.access_token, password);
+      setOk(true);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4">
+          <NexaLogo size={28} radius={8} />
+          <span className="text-sm font-medium text-gray-500">Change password</span>
+        </div>
+        {ok ? (
+          <>
+            <p className="text-sm text-gray-700 mb-4 flex items-center gap-1.5"><Check size={14} style={{ color: "#01875F" }} /> Password updated.</p>
+            <button onClick={onClose} className="w-full py-2.5 rounded-lg text-sm font-medium text-white" style={{ background: "#01875F" }}>Done</button>
+          </>
+        ) : (
+          <>
+            <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="New password" type="password"
+              className="w-full mb-2 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
+            <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirm new password" type="password"
+              className="w-full mb-3 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F]" />
+            {err && <p className="text-xs mb-2" style={{ color: "#C5221F" }}>{err}</p>}
+            <button onClick={submit} disabled={busy || !password || !confirm}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-60" style={{ background: "#01875F" }}>
+              {busy ? <Loader2 size={14} className="animate-spin" /> : null} Update password
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function HeaderAuth({ session, profile, onOpenAuth, onOpenConsole, onSignOut, onChangePassword }) {
   const [open, setOpen] = useState(false);
   if (!session) {
     return (
@@ -456,6 +519,9 @@ function HeaderAuth({ session, profile, onOpenAuth, onOpenConsole, onSignOut }) 
             )}
             <button onClick={() => { setOpen(false); onOpenConsole(); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700">
               <LayoutDashboard size={14} /> Dev console
+            </button>
+            <button onClick={() => { setOpen(false); onChangePassword(); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+              <Key size={14} /> Change password
             </button>
             <button onClick={() => { setOpen(false); onSignOut(); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600">
               <X size={14} /> Sign out
@@ -659,7 +725,7 @@ function AppDetail({ app, session, profile, onBack, onInstall }) {
 /* ---------------------------------------------------------
    Storefront
 --------------------------------------------------------- */
-function StoreFront({ session, profile, onOpenConsole, onOpenAuth, onSignOut }) {
+function StoreFront({ session, profile, onOpenConsole, onOpenAuth, onSignOut, onChangePassword }) {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -712,7 +778,7 @@ function StoreFront({ session, profile, onOpenConsole, onOpenAuth, onSignOut }) 
             style={{ background: "linear-gradient(135deg,#01875F,#1A73E8)" }}>
             <LayoutDashboard size={14} /> Dev console
           </button>
-          <HeaderAuth session={session} profile={profile} onOpenAuth={onOpenAuth} onOpenConsole={onOpenConsole} onSignOut={onSignOut} />
+          <HeaderAuth session={session} profile={profile} onOpenAuth={onOpenAuth} onOpenConsole={onOpenConsole} onSignOut={onSignOut} onChangePassword={onChangePassword} />
         </div>
         {!selected && (
           <div className="max-w-6xl mx-auto px-4 md:px-8 flex gap-1 overflow-x-auto pb-2">
@@ -1434,6 +1500,7 @@ export default function NexaStoreApp() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [pendingConsole, setPendingConsole] = useState(false);
 
   useEffect(() => {
@@ -1509,11 +1576,13 @@ export default function NexaStoreApp() {
           onOpenConsole={openConsole}
           onOpenAuth={() => { setPendingConsole(false); setShowAuth(true); }}
           onSignOut={doSignOut}
+          onChangePassword={() => setShowChangePassword(true)}
         />
       ) : (
         <DevConsole session={session} profile={profile} onBackToStore={() => setView("store")} />
       )}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSignIn={doSignIn} onSignUp={doSignUp} />}
+      {showChangePassword && <ChangePasswordModal session={session} onClose={() => setShowChangePassword(false)} />}
     </>
   );
 }
