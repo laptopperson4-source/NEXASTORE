@@ -98,6 +98,16 @@ async function sbUpload(bucket, path, blob, token) {
   if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error("Upload failed: " + t); }
   return true;
 }
+async function sbUploadLogo(appId, logoBlob, token) {
+  const path = `${appId}/logo`;
+  const res = await fetch(`${STORAGEAPI}/object/nexastore-logos/${path}`, {
+    method: "POST",
+    headers: hdrs(token, { "x-upsert": "true", "Content-Type": logoBlob.type || "image/png" }),
+    body: logoBlob,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error("Logo upload failed: " + t); }
+  return `${SUPABASE_URL}/storage/v1/object/public/nexastore-logos/${path}`;
+}
 async function sbDownload(bucket, path, token) {
   const res = await fetch(`${STORAGEAPI}/object/${bucket}/${path}`, { headers: hdrs(token) });
   if (!res.ok) throw new Error("Download failed");
@@ -152,22 +162,28 @@ async function authUpdatePassword(token, newPassword) {
   return data;
 }
 
-// Standalone build: "Remember me" checked -> localStorage (survives
-// browser restarts). Unchecked -> sessionStorage (cleared when the tab
-// or browser closes).
+// Session persistence uses the artifact's own window.storage (never
+// localStorage/sessionStorage) — personal, not shared, so it's private
+// to whoever is using this artifact. "Remember me" unchecked keeps the
+// session in a plain in-memory variable instead, so it doesn't survive
+// a reload of the artifact.
+let memorySession = null;
 const SESSION_KEY = "nexastore-auth-session";
 async function loadStoredSession() {
-  try {
-    const raw = window.sessionStorage.getItem(SESSION_KEY) || window.localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  if (memorySession) return memorySession;
+  try { const res = await window.storage.get(SESSION_KEY, false); return res ? JSON.parse(res.value) : null; }
+  catch { return null; }
 }
 async function saveStoredSession(session, remember = false) {
-  try { window.sessionStorage.removeItem(SESSION_KEY); window.localStorage.removeItem(SESSION_KEY); } catch {}
-  if (!session) return;
+  memorySession = null;
+  if (session && !remember) {
+    memorySession = session;
+    try { await window.storage.delete(SESSION_KEY, false); } catch {}
+    return;
+  }
   try {
-    if (remember) window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    else window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    if (session) await window.storage.set(SESSION_KEY, JSON.stringify(session), false);
+    else await window.storage.delete(SESSION_KEY, false);
   } catch {}
 }
 
@@ -195,6 +211,7 @@ function mapApp(row) {
     submittedBy: row.submitted_by || "human",
     scanStatus: row.scan_status || "clean",
     scanNotes: row.scan_notes || "",
+    logoUrl: row.logo_url || "",
   };
 }
 
@@ -283,6 +300,13 @@ function Stars({ value, size = 14 }) {
   );
 }
 function AppIcon({ app, size = 56, radius = 14 }) {
+  if (app.logoUrl) {
+    return (
+      <img src={app.logoUrl} alt={app.name} 
+        className="shrink-0 object-cover"
+        style={{ width: size, height: size, borderRadius: radius }} />
+    );
+  }
   return (
     <div className="flex items-center justify-center text-white font-semibold shrink-0"
       style={{ width: size, height: size, borderRadius: radius, background: gradientFor(app.id), fontSize: size * 0.4 }}>
@@ -879,6 +903,8 @@ function emptyForm() {
 function AppForm({ initial, onCancel, onSave }) {
   const [form, setForm] = useState(initial);
   const [file, setFile] = useState(null);
+  const [logo, setLogo] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(initial?.logoUrl || null);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState(null);
@@ -897,7 +923,7 @@ function AppForm({ initial, onCancel, onSave }) {
     if (!valid) return;
     setErr(""); setSaving(true); setProgress(null);
     try {
-      await onSave({ ...form, price: Number(form.price) || 0 }, file, setProgress);
+      await onSave({ ...form, price: Number(form.price) || 0 }, file, setProgress, logo);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -945,6 +971,36 @@ function AppForm({ initial, onCancel, onSave }) {
           <label className="text-xs font-medium text-gray-600">Full description</label>
           <textarea value={form.description} onChange={set("description")} rows={5} placeholder="Describe what your app does"
             className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#01875F] resize-none" />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-gray-600">App logo (optional)</label>
+          <div className="mt-1 flex items-start gap-3">
+            {logoPreview ? (
+              <div className="relative">
+                <img src={logoPreview} alt="logo preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
+                <button type="button" onClick={() => { setLogo(null); setLogoPreview(null); }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600">×</button>
+              </div>
+            ) : null}
+            <div className="flex-1">
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    if (f.size > 2097152) { setErr("Logo must be under 2MB"); return; }
+                    setLogo(f);
+                    const reader = new FileReader();
+                    reader.onload = (evt) => setLogoPreview(evt.target?.result);
+                    reader.readAsDataURL(f);
+                  }
+                }}
+                className="px-3 py-2 text-xs rounded-lg border border-gray-200 w-full cursor-pointer"
+              />
+              <p className="text-xs text-gray-400 mt-1">PNG, JPG, or WebP. Max 2MB. Square recommended (512x512+).</p>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -1045,7 +1101,7 @@ function AppStatsPage({ app, isOwner, profile, onBack, onEdit, onDelete, onAppro
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {app.devId === profile.id && app.status !== "approved" && (
+          {app.devId === profile.id && (
             <>
               <button onClick={() => onEdit(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-gray-200 text-gray-700"><Pencil size={13} /> Edit</button>
               <button onClick={() => onDelete(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-red-100 text-red-600"><Trash2 size={13} /> Delete</button>
@@ -1376,14 +1432,18 @@ function DevConsole({ session, profile, onBackToStore }) {
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
 
-  const handleSave = async (form, file, setProgress) => {
+  const handleSave = async (form, file, setProgress, logo) => {
     const token = session.access_token;
     if (form.id) {
-      await sbUpdate("apps", `id=eq.${form.id}`, {
+      const updates = {
         name: form.name, tagline: form.shortDescription, description: form.description,
         category: form.category, price: form.price, version: form.version,
         release_notes: form.releaseNotes, status: "pending",
-      }, token);
+      };
+      if (logo) {
+        updates.logo_url = await sbUploadLogo(form.id, logo, token);
+      }
+      await sbUpdate("apps", `id=eq.${form.id}`, updates, token);
       flash("Changes saved — resubmitted for review");
     } else {
       const bitCount = Math.max(1, Math.ceil(file.size / BIT_SIZE));
@@ -1393,6 +1453,11 @@ function DevConsole({ session, profile, onBackToStore }) {
         file_name: file.name, file_type: file.type || "application/octet-stream",
         total_size_bytes: file.size, bit_count: bitCount, bit_size_bytes: BIT_SIZE,
       }, token);
+
+      if (logo) {
+        const logoUrl = await sbUploadLogo(appRow.id, logo, token);
+        await sbUpdate("apps", `id=eq.${appRow.id}`, { logo_url: logoUrl }, token);
+      }
 
       for (let i = 0; i < bitCount; i++) {
         setProgress({ done: i, total: bitCount });
