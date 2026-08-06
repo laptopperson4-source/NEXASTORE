@@ -2,6 +2,8 @@
 
 This document describes how any AI model or automated system can publish apps directly to NexaStore without human intervention. The API is stateless, requires only one static key, and handles file chunking, scanning, and submission end-to-end.
 
+**Latest Update (v2):** The API now supports optional logo and screenshot submission directly in the `ai-create-app` call, so you can publish fully-featured app listings with all metadata in one step.
+
 ## Authentication
 
 All requests use a single static API key sent as a header:
@@ -46,7 +48,13 @@ Content-Type: application/json
   "release_notes": "Initial release",
   "file_name": "myapp.apk",
   "file_type": "application/vnd.android.package-archive",
-  "total_size_bytes": 5242880
+  "total_size_bytes": 5242880,
+  "logo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "screenshots": [
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  ]
 }
 ```
 
@@ -61,6 +69,8 @@ Content-Type: application/json
 - `file_name` — the uploaded file's name, e.g. "app.apk" or "app.zip" (required)
 - `file_type` — MIME type (optional, default "application/octet-stream")
 - `total_size_bytes` — exact size of the file in bytes (required)
+- `logo` — optional app logo as base64 data URL (PNG, JPG, WebP; max 2MB). Example: `data:image/png;base64,...`
+- `screenshots` — optional array of 3-10 screenshot data URLs (PNG, JPG, WebP; max 2MB each). Screenshots must be provided as base64 data URLs
 
 **Response:**
 ```json
@@ -159,10 +169,11 @@ If `flagged`, the owner will see the app in their review queue with your scan no
 
 ---
 
-## Complete Workflow Example (Python)
+# Complete Workflow Example (Python)
 
 ```python
 import requests
+import base64
 import os
 
 API_KEY = "nxs_live_<your-key>"
@@ -175,7 +186,13 @@ def headers():
 def headers_binary():
     return {"x-nexastore-key": API_KEY}
 
-# Step 1: Create app listing
+def file_to_data_url(path, mime_type="image/png"):
+    """Convert a file to a data URL for logo/screenshot submission."""
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return f"data:{mime_type};base64,{b64}"
+
+# Step 1: Create app listing WITH logo and screenshots
 app_data = {
     "name": "MyGameEngine",
     "tagline": "A high-performance game engine",
@@ -186,7 +203,14 @@ app_data = {
     "release_notes": "Initial release with core features",
     "file_name": "game_engine.zip",
     "file_type": "application/zip",
-    "total_size_bytes": os.path.getsize("game_engine.zip")
+    "total_size_bytes": os.path.getsize("game_engine.zip"),
+    # Optional: include logo and screenshots as base64
+    "logo": file_to_data_url("app_logo.png", "image/png"),
+    "screenshots": [
+        file_to_data_url("screenshot1.png", "image/png"),
+        file_to_data_url("screenshot2.png", "image/png"),
+        file_to_data_url("screenshot3.png", "image/png"),
+    ]
 }
 
 resp = requests.post(
@@ -198,7 +222,7 @@ resp.raise_for_status()
 result = resp.json()
 app_id = result["app_id"]
 bit_count = result["bit_count"]
-print(f"Created app {app_id}, {bit_count} bits to upload")
+print(f"Created app {app_id}, {bit_count} bits to upload, logo and screenshots stored")
 
 # Step 2: Upload bits
 with open("game_engine.zip", "rb") as f:
@@ -271,7 +295,24 @@ To give your game engine the ability to publish to NexaStore:
 
 3. **Provide the API key as a secret** — either environment variable, config file, or passed at runtime (don't hardcode it).
 
-4. **Poll or wait for scan results** — after step 3, the app is in the review queue. The owner will approve/reject; you can optionally query the `/rest/v1/apps?id=eq.<app_id>` endpoint (authenticated with the same API key as a query parameter: `?apikey=<ANON_KEY>`) to check status if you need to report back.
+4. **Convert images to base64** — when sending logo/screenshots, encode them as data URLs:
+   ```python
+   import base64
+   
+   def file_to_data_url(file_path, mime_type="image/png"):
+       with open(file_path, "rb") as f:
+           b64 = base64.b64encode(f.read()).decode()
+       return f"data:{mime_type};base64,{b64}"
+   
+   # Usage:
+   logo_data_url = file_to_data_url("app_logo.png", "image/png")
+   screenshot_data_urls = [
+       file_to_data_url(f"screenshot{i}.png", "image/png")
+       for i in range(1, 4)
+   ]
+   ```
+
+5. **Poll or wait for scan results** — after step 3, the app is in the review queue. The owner will approve/reject; you can optionally query the `/rest/v1/apps?id=eq.<app_id>` endpoint (authenticated with the same API key as a query parameter: `?apikey=<ANON_KEY>`) to check status if you need to report back.
 
 ---
 
