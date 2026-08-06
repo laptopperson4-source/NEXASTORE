@@ -108,6 +108,42 @@ async function sbUploadLogo(appId, logoBlob, token) {
   if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error("Logo upload failed: " + t); }
   return `${SUPABASE_URL}/storage/v1/object/public/nexastore-logos/${path}`;
 }
+async function sbGetScreenshots(appId, token) {
+  return sbSelect("app_screenshots", `app_id=eq.${appId}&select=*&order=screenshot_index`, token);
+}
+async function sbUploadScreenshots(appId, screenshotDataUrls, token) {
+  // screenshotDataUrls is an array of data URLs (base64)
+  for (let i = 0; i < screenshotDataUrls.length; i++) {
+    const dataUrl = screenshotDataUrls[i];
+    if (!dataUrl.startsWith('data:')) continue; // Skip if already a URL (from edit)
+    
+    // Convert data URL to blob
+    const arr = dataUrl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    const n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    for (let j = 0; j < n; j++) u8arr[j] = bstr.charCodeAt(j);
+    const blob = new Blob([u8arr], { type: mime });
+    
+    // Upload to storage
+    const path = `${appId}/${i}`;
+    const res = await fetch(`${STORAGEAPI}/object/nexastore-screenshots/${path}`, {
+      method: "POST",
+      headers: hdrs(token, { "x-upsert": "true", "Content-Type": mime }),
+      body: blob,
+    });
+    if (!res.ok) throw new Error("Screenshot upload failed");
+    
+    // Store metadata in app_screenshots table
+    const url = `${SUPABASE_URL}/storage/v1/object/public/nexastore-screenshots/${path}`;
+    await sbUpsert("app_screenshots", `app_id=eq.${appId}&screenshot_index=eq.${i}`, {
+      app_id: appId,
+      screenshot_index: i,
+      screenshot_url: url,
+    }, token);
+  }
+}
 async function sbDownload(bucket, path, token) {
   const res = await fetch(`${STORAGEAPI}/object/${bucket}/${path}`, { headers: hdrs(token) });
   if (!res.ok) throw new Error("Download failed");
@@ -574,6 +610,7 @@ function HeaderAuth({ session, profile, onOpenAuth, onOpenConsole, onSignOut, on
 function AppDetail({ app, session, profile, onBack, onInstall }) {
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
+  const [screenshots, setScreenshots] = useState([]);
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(5);
   const [submitting, setSubmitting] = useState(false);
@@ -593,15 +630,16 @@ function AppDetail({ app, session, profile, onBack, onInstall }) {
     setLoadingReviews(false);
   }, [app.id, session]);
 
-  useEffect(() => { loadReviews(); }, [loadReviews]);
+  const loadScreenshots = useCallback(async () => {
+    try {
+      const rows = await sbGetScreenshots(app.id, session && session.access_token);
+      setScreenshots(rows.map((r) => r.screenshot_url));
+    } catch {
+      setScreenshots([]);
+    }
+  }, [app.id, session]);
 
-  const screenshots = useMemo(() => {
-    const rand = seededRandom(hashString(app.id) + 1);
-    return Array.from({ length: 4 }, (_, i) => {
-      const [a, b] = ICON_GRADIENTS[Math.floor(rand() * ICON_GRADIENTS.length)];
-      return { a, b, i };
-    });
-  }, [app.id]);
+  useEffect(() => { loadReviews(); loadScreenshots(); }, [loadReviews, loadScreenshots]);
 
   const handleInstall = async () => {
     setInstalling(true); setInstallErr(""); setDlProgress(null);
@@ -670,7 +708,7 @@ function AppDetail({ app, session, profile, onBack, onInstall }) {
             className="mt-4 px-6 py-2 rounded-full text-sm font-medium text-white transition-colors disabled:opacity-100 flex items-center gap-2"
             style={{ background: installed ? "#1A73E8" : "#01875F" }}>
             {installing ? <Loader2 size={14} className="animate-spin" /> : null}
-            {installed ? "Installed ✓" : installing ? `Fetching bit ${(dlProgress ? dlProgress.done : 0) + 1}${dlProgress ? " / " + dlProgress.total : ""}…` : app.price > 0 ? `Buy $${app.price.toFixed(2)}` : "Install"}
+            {installed ? "Installed ✓" : installing ? "Installing…" : app.price > 0 ? `Buy $${app.price.toFixed(2)}` : "Install"}
           </button>
           {dlProgress && !installed && (
             <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden max-w-xs">
@@ -682,9 +720,20 @@ function AppDetail({ app, session, profile, onBack, onInstall }) {
       </div>
 
       <div className="flex gap-3 overflow-x-auto mt-8 pb-2">
-        {screenshots.map((s) => (
-          <div key={s.i} className="shrink-0 rounded-xl" style={{ width: 160, height: 300, background: `linear-gradient(160deg, ${s.a}, ${s.b})` }} />
-        ))}
+        {screenshots && screenshots.length > 0 ? (
+          screenshots.map((url, i) => (
+            <img key={i} src={url} alt={`screenshot ${i + 1}`} className="shrink-0 rounded-xl object-cover" style={{ width: 160, height: 300 }} />
+          ))
+        ) : (
+          // Fallback to gradient placeholders if no screenshots
+          Array.from({ length: 4 }, (_, i) => {
+            const rand = seededRandom(hashString(app.id) + 1 + i);
+            const [a, b] = ICON_GRADIENTS[Math.floor(rand() * ICON_GRADIENTS.length)];
+            return (
+              <div key={i} className="shrink-0 rounded-xl" style={{ width: 160, height: 300, background: `linear-gradient(160deg, ${a}, ${b})` }} />
+            );
+          })
+        )}
       </div>
 
       <section className="mt-8">
@@ -905,6 +954,7 @@ function AppForm({ initial, onCancel, onSave }) {
   const [file, setFile] = useState(null);
   const [logo, setLogo] = useState(null);
   const [logoPreview, setLogoPreview] = useState(initial?.logoUrl || null);
+  const [screenshots, setScreenshots] = useState(initial?.screenshots || []);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState(null);
@@ -912,7 +962,7 @@ function AppForm({ initial, onCancel, onSave }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const isEdit = !!form.id;
 
-  const valid = form.name.trim() && form.shortDescription.trim() && form.description.trim() && (isEdit || file);
+  const valid = form.name.trim() && form.shortDescription.trim() && form.description.trim() && (isEdit || file) && (form.screenshots && form.screenshots.length >= 3);
 
   const onDrop = (e) => {
     e.preventDefault(); setDragOver(false);
@@ -921,9 +971,10 @@ function AppForm({ initial, onCancel, onSave }) {
 
   const submit = async () => {
     if (!valid) return;
+    if (screenshots.length < 3) { setErr("Please upload at least 3 screenshots"); return; }
     setErr(""); setSaving(true); setProgress(null);
     try {
-      await onSave({ ...form, price: Number(form.price) || 0 }, file, setProgress, logo);
+      await onSave({ ...form, price: Number(form.price) || 0 }, file, setProgress, logo, screenshots);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -1039,6 +1090,38 @@ function AppForm({ initial, onCancel, onSave }) {
           <p className="text-xs text-gray-400">File: {form.fileName || "unchanged"} — the app file can't be replaced after submission. Delete and resubmit to swap it.</p>
         )}
 
+        <div>
+          <label className="text-xs font-medium text-gray-600">Screenshots (minimum 3) <span className="text-gray-400">({screenshots.length})</span></label>
+          <div className="mt-1 grid grid-cols-3 gap-2">
+            {screenshots.map((ss, i) => (
+              <div key={i} className="relative group">
+                <img src={ss} alt={`screenshot ${i + 1}`} className="w-full aspect-video object-cover rounded-lg border border-gray-200" />
+                <button type="button" onClick={() => setScreenshots((s) => s.filter((_, idx) => idx !== i))}
+                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+              </div>
+            ))}
+            {screenshots.length < 10 && (
+              <label className="aspect-video rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer hover:border-[#01875F] hover:bg-[#E6F4EA] transition-colors">
+                <input type="file" accept="image/*" multiple onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  for (const f of files) {
+                    if (f.size > 2097152) { setErr("Screenshot must be under 2MB"); return; }
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                      setScreenshots((s) => [...s.slice(0, 9), evt.target?.result].filter(Boolean));
+                    };
+                    reader.readAsDataURL(f);
+                  }
+                }} className="hidden" />
+                <div className="text-center text-xs text-gray-400">
+                  <p className="font-medium">Add screenshot</p>
+                </div>
+              </label>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">Max 10 screenshots. 2MB each.</p>
+        </div>
+
         {err && <p className="text-xs" style={{ color: "#C5221F" }}>{err}</p>}
 
         {progress && (
@@ -1056,7 +1139,7 @@ function AppForm({ initial, onCancel, onSave }) {
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
             {isEdit ? "Save & resubmit for review" : "Submit for review"}
           </button>
-          {!valid && <span className="text-xs text-gray-400">Fill in name, both descriptions{isEdit ? "" : ", and choose a file"}</span>}
+          {!valid && <span className="text-xs text-gray-400">Fill in name, both descriptions{isEdit ? "" : ", choose a file"}, and upload 3+ screenshots</span>}
         </div>
       </div>
     </div>
@@ -1106,6 +1189,9 @@ function AppStatsPage({ app, isOwner, profile, onBack, onEdit, onDelete, onAppro
               <button onClick={() => onEdit(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-gray-200 text-gray-700"><Pencil size={13} /> Edit</button>
               <button onClick={() => onDelete(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-red-100 text-red-600"><Trash2 size={13} /> Delete</button>
             </>
+          )}
+          {isOwner && app.devId !== profile.id && (
+            <button onClick={() => onDelete(app)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border border-red-100 text-red-600"><Trash2 size={13} /> Delete</button>
           )}
           {isOwner && app.status === "pending" && (
             <>
@@ -1432,7 +1518,7 @@ function DevConsole({ session, profile, onBackToStore }) {
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
 
-  const handleSave = async (form, file, setProgress, logo) => {
+  const handleSave = async (form, file, setProgress, logo, screenshots) => {
     const token = session.access_token;
     if (form.id) {
       const updates = {
@@ -1468,6 +1554,11 @@ function DevConsole({ session, profile, onBackToStore }) {
         await sbInsert("app_bits", { app_id: appRow.id, bit_index: i, bucket_id: bucket, storage_path: path, size_bytes: chunk.size }, token);
       }
       setProgress({ done: bitCount, total: bitCount });
+      
+      if (screenshots && screenshots.length > 0) {
+        await sbUploadScreenshots(appRow.id, screenshots, token);
+      }
+      
       flash("App submitted for review");
     }
     await refresh();
