@@ -962,7 +962,7 @@ function AppForm({ initial, onCancel, onSave }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const isEdit = !!form.id;
 
-  const valid = form.name.trim() && form.shortDescription.trim() && form.description.trim() && (isEdit || file) && (form.screenshots && form.screenshots.length >= 3);
+  const valid = form.name.trim() && form.shortDescription.trim() && form.description.trim() && (isEdit || file) && screenshots.length >= 3;
 
   const onDrop = (e) => {
     e.preventDefault(); setDragOver(false);
