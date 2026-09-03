@@ -1,59 +1,31 @@
-// Generate a deterministic pseudo-random QR code matrix for any given address string
-// This creates realistic-looking authentic QR code patterns without external heavy libraries
-export function generateQrMatrix(address, size = 25)[][] {
-  const matrix[][] = Array.from({ length: size }, () => Array(size).fill(false));
-
-  // Helper to draw a position detection square (standard QR corners)
-  const drawPositionSquare = (row, col) => {
+/** Deterministic fake QR matrix for tutorial display */
+export function generateQrMatrix(address, size = 25) {
+  const matrix = Array.from({ length: size }, () => Array(size).fill(false));
+  let seed = 0;
+  const str = String(address || '0x');
+  for (let i = 0; i < str.length; i++) seed = (seed * 31 + str.charCodeAt(i)) >>> 0;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  };
+  // finder patterns
+  const drawFinder = (r0, c0) => {
     for (let r = 0; r < 7; r++) {
       for (let c = 0; c < 7; c++) {
-        if (
-          r === 0 || r === 6 || c === 0 || c === 6 || // Outer frame
-          (r >= 2 && r <= 4 && c >= 2 && c <= 4)      // Inner solid 3x3
-        ) {
-          matrix[row + r][col + c] = true;
-        } else {
-          matrix[row + r][col + c] = false;
-        }
+        const edge = r === 0 || r === 6 || c === 0 || c === 6;
+        const center = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        if (edge || center) matrix[r0 + r][c0 + c] = true;
       }
     }
   };
-
-  // Top-left, top-right, bottom-left finder patterns
-  drawPositionSquare(0, 0);
-  drawPositionSquare(0, size - 7);
-  drawPositionSquare(size - 7, 0);
-
-  // Timing patterns
-  for (let i = 8; i < size - 8; i++) {
-    matrix[6][i] = i % 2 === 0;
-    matrix[i][6] = i % 2 === 0;
-  }
-
-  // Hash address to fill data modules deterministically
-  let hash = 0;
-  for (let i = 0; i < address.length; i++) {
-    hash = (hash << 5) - hash + address.charCodeAt(i);
-    hash |= 0;
-  }
-
-  let seed = Math.abs(hash);
+  drawFinder(0, 0);
+  drawFinder(0, size - 7);
+  drawFinder(size - 7, 0);
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
-      // Don't overwrite corner finder patterns or separators
-      if (
-        (r < 8 && c < 8) ||
-        (r < 8 && c >= size - 8) ||
-        (r >= size - 8 && c < 8) ||
-        (r === 6 || c === 6)
-      ) {
-        continue;
-      }
-
-      seed = (seed * 9301 + 49297) % 233280;
-      matrix[r][c] = (seed / 233280) > 0.48;
+      if (matrix[r][c]) continue;
+      if (rand() > 0.55) matrix[r][c] = true;
     }
   }
-
   return matrix;
 }

@@ -836,6 +836,9 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
         </div>
       </div>
     </div>
+  );
+}
+
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = Math.max(0, parseFloat(app?.price) || 0);
   const lockedPrice = price.toFixed(2);
