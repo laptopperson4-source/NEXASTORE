@@ -702,6 +702,148 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   );
 }
 
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onSignOut, onOpenAuth, dark }) {
+  const purchases = profile ? (getPurchases()[profile.id] || []) : [];
+  const bg = dark ? 'bg-transparent' : 'bg-transparent';
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100 shadow-sm';
+  const chip = dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700';
+
+  if (!session || !profile) {
+    return (
+      <div className={`${bg} max-w-2xl mx-auto px-1 py-6`}>
+        <div className={`rounded-2xl border p-6 text-center ${card}`}>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center mx-auto mb-4">
+            <User size={26} className="text-white" />
+          </div>
+          <p className={`font-bold text-[16px] ${text} mb-1`}>Your profile</p>
+          <p className={`text-[13px] ${subtext} mb-5`}>Sign in to manage your account, crypto wallet, and purchases.</p>
+          <button onClick={onOpenAuth} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-5 py-2.5 rounded-xl font-semibold text-[13.5px]">
+            Sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${bg} max-w-2xl mx-auto space-y-5 pb-8`}>
+      {/* Account header */}
+      <div className={`rounded-2xl border p-5 flex items-center gap-4 ${card}`}>
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl flex-shrink-0">
+          {(profile.email || '?').charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className={`font-extrabold text-[16px] ${text} truncate`}>{profile.email?.split('@')[0] || 'User'}</p>
+          <p className={`text-[13px] ${subtext} truncate`}>{profile.email}</p>
+        </div>
+        {profile.is_owner && (
+          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-violet-500/15 text-violet-500">Owner</span>
+        )}
+      </div>
+
+      {/* Crypto account CTA — primary message */}
+      <div className={`rounded-2xl border overflow-hidden ${dark ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 to-teal-600/10' : 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50'}`}>
+        <div className="p-5">
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center flex-shrink-0">
+              <Wallet size={20} className="text-white" />
+            </div>
+            <div>
+              <p className={`font-extrabold text-[15px] leading-snug ${dark ? 'text-emerald-200' : 'text-emerald-900'}`}>
+                Create a crypto account now if you ever plan to buy anything from NexaStore
+              </p>
+              <p className={`text-[12.5px] mt-1.5 ${dark ? 'text-emerald-300/80' : 'text-emerald-800/80'}`}>
+                NexaStore accepts <span className="font-bold">USDT only</span>. Connect a wallet once — then you can unlock premium apps anytime.
+              </p>
+            </div>
+          </div>
+
+          {wallet ? (
+            <div className={`rounded-xl px-3.5 py-3 flex items-center gap-3 mb-3 ${dark ? 'bg-black/20' : 'bg-white/80 border border-emerald-100'}`}>
+              <CheckCircle2 size={18} className="text-emerald-500 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className={`text-[13px] font-bold ${text}`}>{wallet.name} connected</p>
+                <p className={`text-[11.5px] truncate ${subtext}`}>{wallet.address}</p>
+              </div>
+              <button onClick={onDisconnectWallet} className={`text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button onClick={onConnectWallet}
+              className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90 flex items-center justify-center gap-2">
+              <Wallet size={16} /> Create crypto account
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Recommended wallets catalog */}
+      <div>
+        <p className={`text-[12px] font-bold uppercase tracking-wider mb-2.5 ${subtext}`}>Recommended wallets</p>
+        <p className={`text-[13px] mb-3 ${subtext}`}>Open one of these to create or manage your USDT wallet, then connect it above.</p>
+        <div className="space-y-2">
+          {RECOMMENDED_WALLETS.map(w => (
+            <div key={w.id} className={`rounded-xl border px-3.5 py-3 flex items-start gap-3 ${card}`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-600'}`}>
+                <Wallet size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
+                <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
+                <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
+              </div>
+              <a href={w.url} target="_blank" rel="noopener noreferrer"
+                className={`flex-shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${chip} hover:opacity-80`}>
+                Open <ExternalLink size={12} />
+              </a>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Purchases summary */}
+      <div className={`rounded-2xl border p-5 ${card}`}>
+        <p className={`font-bold text-[14px] ${text} mb-1`}>Your purchases</p>
+        <p className={`text-[12.5px] ${subtext} mb-3`}>
+          {purchases.length === 0
+            ? 'No paid apps yet. When you buy with USDT, they’ll show up here.'
+            : `${purchases.length} app${purchases.length === 1 ? '' : 's'} unlocked with USDT.`}
+        </p>
+        {purchases.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {purchases.map(id => (
+              <span key={id} className={`text-[11px] font-mono px-2 py-1 rounded-md ${chip}`}>{String(id).slice(0, 8)}…</span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="space-y-2">
+        {profile.is_owner && (
+          <button onClick={onOpenAdmin}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+              <ShieldCheck size={18} className="text-violet-500" /> Admin Dashboard
+            </span>
+            <ChevronRight size={17} className={subtext} />
+          </button>
+        )}
+        <button onClick={onSignOut}
+          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${dark ? 'border-red-500/30 bg-red-500/10' : 'border-red-100 bg-red-50'} hover:opacity-90`}>
+          <span className="flex items-center gap-3 font-semibold text-[14px] text-red-500">
+            <LogOut size={18} /> Sign out
+          </span>
+          <ChevronRight size={17} className="text-red-400" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DevConsole({ session, profile, onClose, onPublished, dark }) {
   const [formData, setFormData] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
   const [appFile, setAppFile] = useState(null);
@@ -1481,6 +1623,7 @@ function DesktopSidebar({ view, setView }) {
     { id: 'updates', label: 'Updates', icon: Bell },
   ];
   const libraryItems = [
+    { id: 'profile', label: 'Profile', icon: User },
     { id: 'myapps', label: 'My Apps', icon: Gamepad2 },
     { id: 'installed', label: 'Installed', icon: CheckSquare },
     { id: 'downloads', label: 'Downloads', icon: Download },
@@ -1509,7 +1652,7 @@ function DesktopSidebar({ view, setView }) {
           <p className="text-[11px] font-bold text-gray-400 px-4 mb-2 tracking-wider">LIBRARY</p>
           {libraryItems.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setView(id)}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors text-gray-600 hover:bg-gray-50 font-medium text-[15px]">
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-[15px] ${view === id ? 'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold shadow-[0_4px_14px_rgba(99,102,241,0.35)]' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
               <Icon size={19} strokeWidth={2.2} />
               {label}
             </button>
@@ -1603,13 +1746,13 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const libraryViews = ['myapps', 'installed', 'downloads', 'wishlist'];
-  const viewTitles = { discover: 'Discover', charts: 'Top Charts', categories: 'Categories', updates: 'Updates' };
+  const viewTitles = { discover: 'Discover', charts: 'Top Charts', categories: 'Categories', updates: 'Updates', profile: 'Profile' };
 
   useEffect(() => {
     if (view !== 'wishlist' || !session || !profile) return;
@@ -1650,6 +1793,9 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                   {showProfileMenu && (
                     <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-100 rounded-2xl shadow-lg p-3 z-30">
                       <p className="text-[13px] text-gray-500 px-2 pb-2 truncate">{profile.email}</p>
+                      <button onClick={() => { setView('profile'); setShowProfileMenu(false); }} className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 text-[13.5px] font-semibold text-gray-800 flex items-center gap-2">
+                        <User size={15} /> Profile
+                      </button>
                       {profile.is_owner && (
                         <button onClick={() => { onOpenAdmin(); setShowProfileMenu(false); }} className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 text-[13.5px] font-semibold text-violet-600 flex items-center gap-2">
                           <ShieldCheck size={15} /> Admin Dashboard
@@ -1777,6 +1923,23 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
               </div>
             )}
 
+            {view === 'profile' && (
+              <div>
+                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Profile</h2>
+                <ProfileView
+                  session={session}
+                  profile={profile}
+                  wallet={wallet}
+                  onConnectWallet={onConnectWallet}
+                  onDisconnectWallet={onDisconnectWallet}
+                  onOpenAdmin={onOpenAdmin}
+                  onSignOut={onSignOut}
+                  onOpenAuth={onOpenAuth}
+                  dark={false}
+                />
+              </div>
+            )}
+
             {libraryViews.includes(view) && (
               <div>
                 <h2 className="text-[19px] font-extrabold text-gray-900 mb-5 capitalize">{view === 'myapps' ? 'My Apps' : view}</h2>
@@ -1795,8 +1958,8 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
               </div>
             )}
 
-            {loading && view !== 'categories' && <p className="text-center py-16 text-gray-400 text-sm">Loading apps…</p>}
-            {!loading && filteredApps.length === 0 && !libraryViews.includes(view) && <p className="text-center py-16 text-gray-400 text-sm">No apps found</p>}
+            {loading && view !== 'categories' && view !== 'profile' && <p className="text-center py-16 text-gray-400 text-sm">Loading apps…</p>}
+            {!loading && filteredApps.length === 0 && !libraryViews.includes(view) && view !== 'profile' && <p className="text-center py-16 text-gray-400 text-sm">No apps found</p>}
           </div>
 
           <DesktopRightSidebar topApps={filteredApps} latestApps={filteredApps} onOpenConsole={onOpenDeveloper} />
@@ -1831,7 +1994,7 @@ function MobileBottomNav({ view, setView }) {
     { id: 'updates', label: 'Updates', icon: Bell },
     { id: 'library', label: 'Library', icon: Gamepad2 },
   ];
-  const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist'];
+  const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist', 'profile'];
   const activeTab = libraryDetailViews.includes(view) ? 'library' : view;
   return (
     <nav className="fixed bottom-0 inset-x-0 bg-[#0c1129]/95 backdrop-blur border-t border-white/10 flex z-30 md:hidden">
@@ -1845,14 +2008,15 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet }) {
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
   const [wishlistLoading, setWishlistLoading] = useState(false);
-  const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist'];
+  const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist', 'profile'];
   const libraryMenu = [
+    { id: 'profile', label: 'Profile', icon: User },
     { id: 'myapps', label: 'My Apps', icon: Gamepad2 },
     { id: 'installed', label: 'Installed', icon: CheckSquare },
     { id: 'downloads', label: 'Downloads', icon: Download },
@@ -1890,6 +2054,9 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               {showProfileMenu && (
                 <div className="absolute right-0 mt-2 w-52 bg-white border border-gray-100 rounded-2xl shadow-lg p-3 z-30">
                   <p className="text-[12.5px] text-gray-500 px-2 pb-2 truncate">{profile.email}</p>
+                  <button onClick={() => { setView('profile'); setShowProfileMenu(false); }} className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 text-[13px] font-semibold text-gray-800 flex items-center gap-2">
+                    <User size={14} /> Profile
+                  </button>
                   {profile.is_owner && (
                     <button onClick={() => { onOpenAdmin(); setShowProfileMenu(false); }} className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 text-[13px] font-semibold text-violet-600 flex items-center gap-2">
                       <ShieldCheck size={14} /> Admin Dashboard
@@ -2094,7 +2261,27 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
         </div>
       )}
 
-      {libraryDetailViews.includes(view) && (
+      {view === 'profile' && (
+        <div className="px-4 mb-8">
+          <button onClick={() => setView('library')} className="text-violet-400 text-[12.5px] font-semibold mb-3 flex items-center gap-1">
+            <ChevronRight size={14} strokeWidth={2.5} className="rotate-180" /> Library
+          </button>
+          <h2 className="text-[16px] font-extrabold text-white mb-4">Profile</h2>
+          <ProfileView
+            session={session}
+            profile={profile}
+            wallet={wallet}
+            onConnectWallet={onConnectWallet}
+            onDisconnectWallet={onDisconnectWallet}
+            onOpenAdmin={onOpenAdmin}
+            onSignOut={onSignOut}
+            onOpenAuth={onOpenAuth}
+            dark={true}
+          />
+        </div>
+      )}
+
+      {libraryDetailViews.includes(view) && view !== 'profile' && (
         <div className="px-4 mb-8">
           <button onClick={() => setView('library')} className="text-violet-400 text-[12.5px] font-semibold mb-3 flex items-center gap-1">
             <ChevronRight size={14} strokeWidth={2.5} className="rotate-180" /> Library
@@ -2115,7 +2302,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
       )}
 
       {loading && view === 'home' && <p className="text-center py-10 text-slate-500 text-sm">Loading apps…</p>}
-      {!loading && filteredApps.length === 0 && !libraryDetailViews.includes(view) && view !== 'library' && <p className="text-center py-10 text-slate-500 text-sm">No apps found</p>}
+      {!loading && filteredApps.length === 0 && !libraryDetailViews.includes(view) && view !== 'library' && view !== 'profile' && <p className="text-center py-10 text-slate-500 text-sm">No apps found</p>}
 
       <div className="h-20" />
       <MobileBottomNav view={view} setView={setView} />
@@ -2299,6 +2486,13 @@ export default function NexaStore() {
     categories, onOpenAuth: () => setShowAuthModal(true), onSignOut: handleSignOut, onOpenDeveloper: openDeveloper,
     onOpenApp: (app) => setSelectedApp(app), onOpenAdmin: () => setShowAdmin(true),
     installState, showToast, isOwned,
+    wallet,
+    onConnectWallet: () => setShowWalletModal(true),
+    onDisconnectWallet: () => {
+      setStoredWallet(null);
+      setWallet(null);
+      showToast('Wallet disconnected', 'info');
+    },
   };
   void ownedTick;
 
