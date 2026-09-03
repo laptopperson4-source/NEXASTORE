@@ -1,0 +1,19 @@
+Replace YOUR_WIDGET_HOST with where you host nexapay-widget.html
+
+<iframe
+  src="https://YOUR_WIDGET_HOST/nexapay-widget.html?amount=49.99"
+  title="NexaPay"
+  width="400"
+  height="560"
+  style="border:none;border-radius:16px;max-width:100%"
+  allow="clipboard-write"
+></iframe>
+
+<script>
+window.addEventListener("message", (e) => {
+  if (e.data?.type === "nexapay:success") {
+    // unlock product / mark paid
+    console.log("Paid:", e.data.orderId);
+  }
+});
+</script>

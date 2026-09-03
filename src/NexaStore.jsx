@@ -639,99 +639,85 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
 }
 
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, dark }) {
-  const [paying, setPaying] = useState(false);
-  const [error, setError] = useState('');
   const price = parseFloat(app.price) || 0;
-  const bg = dark ? 'bg-[#12172f]' : 'bg-white';
+  const email = (profile && profile.email) || '';
+  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
 
-  const pay = async () => {
-    if (!wallet) { onNeedWallet?.(); return; }
-    setPaying(true);
-    setError('');
-    try {
-      // Simulated USDT transfer — production would call a payment edge function / on-chain check
-      await new Promise(r => setTimeout(r, 1400));
-      markPurchased(app.id, profile?.id);
-      try {
-        if (session && profile) {
-          await sbInsert('purchases', {
-            app_id: app.id,
-            user_id: profile.id,
-            amount_usdt: price,
-            wallet_address: wallet.address,
-            wallet_provider: wallet.provider,
-            status: 'completed',
-          }, session).catch(() => {});
-        }
-      } catch {}
-      onPaid?.(app);
-      onClose();
-    } catch (e) {
-      setError(e.message || 'Payment failed. Try again.');
-    } finally {
-      setPaying(false);
+  // NexaPay: self-hosted USDT (Polygon) widget + worker
+  const widgetSrc = '/nexapay-widget.html?amount=' + encodeURIComponent(price.toFixed(2)) + '&email=' + encodeURIComponent(email);
+
+  useEffect(() => {
+    function onMessage(event) {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'nexapay:success') {
+        const orderId = data.orderId;
+        markPurchased(app.id, profile && profile.id);
+        try {
+          if (session && profile) {
+            sbInsert('purchases', {
+              app_id: app.id,
+              user_id: profile.id,
+              amount_usdt: price,
+              nexapay_order_id: orderId || null,
+              wallet_address: (wallet && wallet.address) || null,
+              wallet_provider: (wallet && wallet.provider) || 'nexapay',
+              status: 'completed',
+            }, session).catch(function () {});
+          }
+        } catch (e) {}
+        onPaid && onPaid(app, orderId);
+        onClose && onClose();
+      }
     }
-  };
+    window.addEventListener('message', onMessage);
+    return function () { window.removeEventListener('message', onMessage); };
+  }, [app, session, profile, wallet, price, onPaid, onClose]);
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={`${bg} rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden`}>
-        <div className="px-5 pt-5 pb-3 flex items-start justify-between">
-          <div>
-            <p className={`font-bold text-[16px] ${text}`}>Unlock {app.name}</p>
-            <p className={`text-[13px] ${subtext} mt-0.5`}>Pay once with USDT — lifetime access</p>
+    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-3 sm:p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={bg + " rounded-2xl w-full max-w-[420px] shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"}>
+        <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-2 flex-shrink-0">
+          <div className="min-w-0">
+            <p className={"font-bold text-[15px] truncate " + text}>Pay for {app.name}</p>
+            <p className={"text-[12px] " + subtext}>NexaPay · USDT on Polygon</p>
           </div>
-          <button onClick={onClose} className={`p-1.5 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X size={18} className={text} /></button>
-        </div>
-
-        <div className="px-5 pb-5 space-y-4">
-          <div className={`rounded-2xl p-4 ${dark ? 'bg-white/5' : 'bg-gray-50'}`}>
-            <div className="flex items-center gap-3">
-              {app.logo_url ? (
-                <img src={app.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover" />
-              ) : (
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600" />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className={`font-bold text-[14px] truncate ${text}`}>{app.name}</p>
-                <p className={`text-[12px] ${subtext}`}>{app.category}</p>
-              </div>
-              <div className="text-right">
-                <p className="font-extrabold text-[18px] text-emerald-500">{price.toFixed(2)}</p>
-                <p className={`text-[11px] font-semibold ${subtext}`}>USDT</p>
-              </div>
-            </div>
-          </div>
-
-          {wallet ? (
-            <div className={`rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 ${dark ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-emerald-50 border border-emerald-100'}`}>
-              <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className={`text-[12px] font-semibold ${dark ? 'text-emerald-300' : 'text-emerald-800'}`}>{wallet.name}</p>
-                <p className={`text-[11px] truncate ${subtext}`}>{wallet.address}</p>
-              </div>
-            </div>
-          ) : (
-            <button type="button" onClick={onNeedWallet}
-              className="w-full rounded-xl border-2 border-dashed border-violet-400/50 py-3 text-[13px] font-semibold text-violet-500 hover:bg-violet-500/5">
-              Create / connect crypto account
-            </button>
-          )}
-
-          <div className={`flex items-start gap-2 text-[12px] ${subtext}`}>
-            <Lock size={14} className="mt-0.5 flex-shrink-0" />
-            <p>Payments are USDT-only. This demo confirms purchase locally; wire a real on-chain or processor check for production.</p>
-          </div>
-
-          {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
-
-          <button type="button" onClick={pay} disabled={paying || !wallet}
-            className="w-full py-3.5 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
-            {paying ? <><Loader2 size={16} className="animate-spin" /> Processing…</> : <><DollarSign size={16} /> Pay {price.toFixed(2)} USDT</>}
+          <button onClick={onClose} className={"p-1.5 rounded-lg flex-shrink-0 " + (dark ? 'hover:bg-white/10' : 'hover:bg-gray-100')}>
+            <X size={18} className={text} />
           </button>
         </div>
+
+        <div className={"mx-4 mb-2 rounded-xl px-3 py-2 flex items-center gap-2.5 flex-shrink-0 " + (dark ? 'bg-white/5' : 'bg-gray-50')}>
+          {app.logo_url ? (
+            <img src={app.logo_url} alt="" className="w-9 h-9 rounded-lg object-cover" />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className={"font-semibold text-[13px] truncate " + text}>{app.name}</p>
+            <p className={"text-[11px] " + subtext}>{app.category}</p>
+          </div>
+          <div className="text-right">
+            <p className="font-extrabold text-[15px] text-emerald-500">{price.toFixed(2)}</p>
+            <p className={"text-[10px] font-semibold " + subtext}>USDT</p>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 px-2 pb-2">
+          <iframe
+            title="NexaPay"
+            src={widgetSrc}
+            className="w-full border-0 rounded-xl"
+            style={{ height: '520px', maxHeight: '70vh', background: 'transparent' }}
+            allow="clipboard-write"
+          />
+        </div>
+
+        <p className={"text-[11px] text-center px-4 pb-3 " + subtext}>
+          Powered by NexaPay · Send USDT on Polygon to complete payment
+        </p>
       </div>
     </div>
   );
@@ -2787,11 +2773,7 @@ export default function NexaStore() {
         showToast('Sign in to purchase premium apps.', 'info');
         return;
       }
-      if (!wallet) {
-        setPayApp(app);
-        setShowWalletModal(true);
-        return;
-      }
+      // Open NexaPay checkout (USDT on Polygon). Wallet setup is optional and available in Profile.
       setPayApp(app);
       return;
     }
@@ -2893,7 +2875,7 @@ export default function NexaStore() {
           }}
         />
       )}
-      {payApp && wallet && !showWalletModal && (
+      {payApp && !showWalletModal && (
         <PaymentModal
           app={payApp}
           session={session}

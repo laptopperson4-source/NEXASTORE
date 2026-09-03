@@ -1,0 +1,7 @@
+name = "nexapay-gateway"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# Secrets (set via `npx wrangler secret put`):
+#   SUPABASE_URL
+#   SUPABASE_KEY
