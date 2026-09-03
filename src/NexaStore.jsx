@@ -213,6 +213,40 @@ function formatPrice(price) {
   return `${p.toFixed(2)} USDT`;
 }
 
+const DEV_PROFILES_KEY = 'nexastore_dev_profiles';
+function getLocalDevProfile(userId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DEV_PROFILES_KEY) || '{}');
+    return all[userId] || null;
+  } catch { return null; }
+}
+function setLocalDevProfile(userId, data) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DEV_PROFILES_KEY) || '{}');
+    all[userId] = { ...(all[userId] || {}), ...data };
+    localStorage.setItem(DEV_PROFILES_KEY, JSON.stringify(all));
+  } catch {}
+}
+function mergeDevProfile(profile) {
+  if (!profile?.id) return profile;
+  const local = getLocalDevProfile(profile.id);
+  if (!local) return profile;
+  return {
+    ...profile,
+    developer_name: profile.developer_name || local.developer_name || null,
+    company_name: profile.company_name || local.company_name || null,
+    is_developer: profile.is_developer || local.is_developer || false,
+  };
+}
+function isDeveloperAccount(profile) {
+  if (!profile) return false;
+  return !!(profile.is_developer || profile.developer_name || profile.company_name);
+}
+function publicDevName(profile) {
+  if (!profile) return '';
+  return (profile.developer_name || profile.company_name || '').trim();
+}
+
 function BannerCarousel({ rounded = 'rounded-[28px]', maxHeight = '360px', dotBottom = 'bottom-5' }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
@@ -736,8 +770,11 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
           {(profile.email || '?').charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className={`font-extrabold text-[16px] ${text} truncate`}>{profile.email?.split('@')[0] || 'User'}</p>
+          <p className={`font-extrabold text-[16px] ${text} truncate`}>{publicDevName(profile) || profile.email?.split('@')[0] || 'User'}</p>
           <p className={`text-[13px] ${subtext} truncate`}>{profile.email}</p>
+          {isDeveloperAccount(profile) && (
+            <p className={`text-[11.5px] mt-0.5 font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>Developer · {publicDevName(profile)}</p>
+          )}
         </div>
         {profile.is_owner && (
           <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-violet-500/15 text-violet-500">Owner</span>
@@ -827,7 +864,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
         <button onClick={onOpenDeveloper}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
           <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
-            <Code size={18} className="text-violet-500" /> Become a Developer
+            <Code size={18} className="text-violet-500" /> {isDeveloperAccount(profile) ? 'Developer Console' : 'Become a Developer'}
           </span>
           <ChevronRight size={17} className={subtext} />
         </button>
@@ -852,7 +889,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
   );
 }
 
-function DevConsole({ session, profile, onClose, onPublished, dark, showToast }) {
+function DevConsole({ session, profile, onClose, onPublished, dark, showToast, onProfileUpdated }) {
   const [tab, setTab] = useState('overview');
   const [myApps, setMyApps] = useState([]);
   const [appsLoading, setAppsLoading] = useState(true);
@@ -867,6 +904,11 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast })
   const [editingApp, setEditingApp] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
   const [editSaving, setEditSaving] = useState(false);
+  const [setupName, setSetupName] = useState('');
+  const [setupCompany, setSetupCompany] = useState('');
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [setupError, setSetupError] = useState('');
+  const hasDevAccount = isDeveloperAccount(profile);
 
   const set = (field) => (e) => setFormData({ ...formData, [field]: e.target.value });
   const setEdit = (field) => (e) => setEditForm({ ...editForm, [field]: e.target.value });
@@ -883,7 +925,43 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast })
     }
   };
 
-  useEffect(() => { loadMyApps(); }, [session, profile?.id]);
+  useEffect(() => {
+    if (hasDevAccount) loadMyApps();
+    else setAppsLoading(false);
+  }, [session, profile?.id, hasDevAccount]);
+
+  const createDevAccount = async (e) => {
+    e.preventDefault();
+    setSetupError('');
+    const name = setupName.trim();
+    const company = setupCompany.trim();
+    if (!name) {
+      setSetupError('Enter the name that will be shown on your apps (company or personal brand).');
+      return;
+    }
+    setSetupBusy(true);
+    try {
+      const payload = {
+        developer_name: name,
+        company_name: company || name,
+        is_developer: true,
+      };
+      setLocalDevProfile(profile.id, payload);
+      try {
+        await sbUpdate('profiles', payload, { id: profile.id }, session);
+      } catch {
+        // Column may not exist yet on Supabase — local profile still works
+      }
+      const next = mergeDevProfile({ ...profile, ...payload });
+      onProfileUpdated?.(next);
+      showToast?.('Developer account created', 'success');
+    } catch (err) {
+      setSetupError(err.message || 'Could not create developer account.');
+    } finally {
+      setSetupBusy(false);
+    }
+  };
+
 
   const statusCounts = useMemo(() => {
     const c = { approved: 0, pending: 0, rejected: 0, other: 0 };
@@ -1031,6 +1109,63 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast })
     return <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${cls}`}>{status || 'unknown'}</span>;
   };
 
+  if (!hasDevAccount) {
+    return (
+      <div className={`fixed inset-0 z-50 overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div className={`sticky top-0 ${bg} border-b ${border} px-4 py-3 flex items-center gap-3 z-10`}>
+          <button onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <p className={`font-bold text-[15px] ${text} leading-tight`}>Create developer account</p>
+            <p className={`text-[11.5px] ${subtext}`}>Required before you can publish on NexaStore</p>
+          </div>
+        </div>
+        <div className="max-w-md mx-auto px-4 py-8">
+          <div className={`rounded-2xl border p-5 ${card}`}>
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center mb-4">
+              <Code size={22} className="text-white" />
+            </div>
+            <p className={`font-extrabold text-[16px] ${text} mb-1`}>Become a NexaStore developer</p>
+            <p className={`text-[13px] ${subtext} mb-5 leading-relaxed`}>
+              Choose the name shoppers will see on your apps — your company name or a public brand name.
+            </p>
+            <form onSubmit={createDevAccount} className="space-y-3.5">
+              <div>
+                <label className={`text-[12px] font-semibold ${subtext}`}>Display name (shown publicly) *</label>
+                <input
+                  value={setupName}
+                  onChange={(e) => setSetupName(e.target.value)}
+                  placeholder="e.g. NexaPulse Studio"
+                  className={`${inputCls} mt-1.5`}
+                  maxLength={80}
+                />
+              </div>
+              <div>
+                <label className={`text-[12px] font-semibold ${subtext}`}>Company / organization (optional)</label>
+                <input
+                  value={setupCompany}
+                  onChange={(e) => setSetupCompany(e.target.value)}
+                  placeholder="Legal or trading name"
+                  className={`${inputCls} mt-1.5`}
+                  maxLength={120}
+                />
+              </div>
+              <p className={`text-[12px] ${subtext}`}>
+                This name appears under your apps in the store. You can publish, track status, and edit listings after setup.
+              </p>
+              {setupError && <p className="text-red-500 text-[13px] font-medium">{setupError}</p>}
+              <button type="submit" disabled={setupBusy}
+                className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 disabled:opacity-50">
+                {setupBusy ? 'Creating…' : 'Create developer account'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`fixed inset-0 z-50 overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className={`sticky top-0 ${bg} border-b ${border} px-4 py-3 flex items-center gap-3 z-10`}>
@@ -1039,7 +1174,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast })
         </button>
         <div className="flex-1 min-w-0">
           <p className={`font-bold text-[15px] ${text} leading-tight`}>Developer Console</p>
-          <p className={`text-[11.5px] ${subtext}`}>Charts, publish new apps, and edit your listings</p>
+          <p className={`text-[11.5px] ${subtext}`}>{publicDevName(profile) || 'Your developer dashboard'} · charts, publish & edit</p>
         </div>
       </div>
 
@@ -1457,8 +1592,15 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
       } catch {}
       if (app.dev_id) {
         try {
-          const profs = await sbSelect('profiles', `id=eq.${app.dev_id}&select=email`).catch(() => []);
-          if (!cancelled && profs?.[0]?.email) setDevName(profs[0].email.split('@')[0]);
+          const profs = await sbSelect('profiles', `id=eq.${app.dev_id}&select=email,developer_name,company_name`).catch(() => []);
+          if (!cancelled && profs?.[0]) {
+            const nm = profs[0].developer_name || profs[0].company_name || (profs[0].email ? profs[0].email.split('@')[0] : '');
+            if (nm) setDevName(nm);
+            else {
+              const local = getLocalDevProfile(app.dev_id);
+              if (local?.developer_name) setDevName(local.developer_name);
+            }
+          }
         } catch {}
       }
       if (session && profile) {
@@ -2561,9 +2703,9 @@ export default function NexaStore() {
           setSession(token);
           try {
             const profiles = await sbSelect('profiles', `id=eq.${user.id}`, token);
-            setProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false });
+            setProfile(mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false }));
           } catch (e) {
-            setProfile({ id: user.id, email: user.email, is_owner: false });
+            setProfile(mergeDevProfile({ id: user.id, email: user.email, is_owner: false }));
           }
         }
       });
@@ -2663,9 +2805,9 @@ export default function NexaStore() {
       if (user) {
         try {
           const profiles = await sbSelect('profiles', `id=eq.${user.id}`, token);
-          setProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false });
+          setProfile(mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false }));
         } catch (e) {
-          setProfile({ id: user.id, email: user.email, is_owner: false });
+          setProfile(mergeDevProfile({ id: user.id, email: user.email, is_owner: false }));
         }
       }
     });
@@ -2714,10 +2856,10 @@ export default function NexaStore() {
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
           <div className="hidden md:block">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
         </>
       )}
