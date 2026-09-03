@@ -674,7 +674,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
 
   // NexaPay: self-hosted USDT (Polygon) widget + worker
-  const widgetSrc = '/nexapay-widget.html?amount=' + encodeURIComponent(price.toFixed(2)) + '&email=' + encodeURIComponent(email);
+  const widgetSrc = '/nexapay-widget.html?amount=' + encodeURIComponent(price.toFixed(2)) + '&email=' + encodeURIComponent(email) + '&lock=1';
 
   useEffect(() => {
     function onMessage(event) {
@@ -682,6 +682,12 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       if (!data || typeof data !== 'object') return;
       if (data.type === 'nexapay:success') {
         const orderId = data.orderId;
+        // Reject if paid amount was tampered with (must match developer-set price)
+        const paid = parseFloat(data.amount);
+        if (isFinite(paid) && Math.abs(paid - price) > 0.02) {
+          console.warn('NexaPay amount mismatch — ignoring success', paid, price);
+          return;
+        }
         markPurchased(app.id, profile && profile.id);
         try {
           if (session && profile) {
