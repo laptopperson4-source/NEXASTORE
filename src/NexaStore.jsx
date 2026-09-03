@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import TutorialAnimPlayer from './TutorialAnimPlayer.jsx';
 import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -592,129 +593,14 @@ function FileDropField({ label, hint, icon: Icon, accept, multiple, onChange, fi
 
 
 function TutorialViewer({ tutorial, onClose, onBack, dark }) {
-  const [step, setStep] = useState(0);
-  const [videoUrl, setVideoUrl] = useState(null);
-  const steps = tutorial?.steps || [];
-  const cur = steps[step] || null;
-  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
-  const text = dark ? 'text-white' : 'text-gray-900';
-  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
-  const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100';
-
-  useEffect(() => {
-    let cancelled = false;
-    setVideoUrl(null);
-    if (!tutorial?.id) return;
-    fetch('/tutorials/videos/manifest.json')
-      .then(r => r.ok ? r.json() : {})
-      .then(m => {
-        if (!cancelled && m && m[tutorial.id]) setVideoUrl(m[tutorial.id]);
-      })
-      .catch(() => {});
-    // Fallback direct path
-    const direct = `/tutorials/videos/${tutorial.id}.mp4`;
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.src = direct;
-    v.onloadedmetadata = () => { if (!cancelled) setVideoUrl(direct); };
-    return () => { cancelled = true; };
-  }, [tutorial?.id]);
-
-  if (!tutorial) return null;
-
+  // Full animated wallet UI + moving cursor + voiceover (from tutorial tool design)
   return (
-    <div className={`fixed inset-0 z-[170] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-2 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100'}`}>
-        <button type="button" onClick={onBack || onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-          <ChevronLeft size={20} className={text} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <p className={`font-bold text-[14px] truncate ${text}`}>{tutorial.walletName}</p>
-          <p className={`text-[11.5px] truncate ${subtext}`}>{tutorial.networkName || tutorial.subtitle || 'NexaStore USDT guide'}</p>
-        </div>
-        <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-          <X size={18} className={text} />
-        </button>
-      </div>
-
-      <div className="max-w-lg mx-auto px-4 py-5">
-        <h1 className={`font-extrabold text-[17px] leading-snug mb-1 ${text}`}>{tutorial.title}</h1>
-        {tutorial.subtitle && <p className={`text-[13px] mb-3 ${subtext}`}>{tutorial.subtitle}</p>}
-
-        {videoUrl && (
-          <div className={`rounded-2xl overflow-hidden border mb-4 ${dark ? 'border-white/10' : 'border-gray-200'}`}>
-            <video
-              key={videoUrl}
-              src={videoUrl}
-              controls
-              playsInline
-              className="w-full bg-black aspect-[9/16] max-h-[420px] object-contain"
-              poster=""
-            />
-            <p className={`text-[11px] px-3 py-2 ${subtext}`}>Video guide · USDT on Polygon only</p>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
-          {steps.map((s, i) => (
-            <button key={i} type="button" onClick={() => setStep(i)}
-              className={`flex-shrink-0 w-8 h-8 rounded-full text-[12px] font-bold ${
-                i === step
-                  ? 'bg-violet-600 text-white'
-                  : i < step
-                    ? (dark ? 'bg-emerald-500/30 text-emerald-300' : 'bg-emerald-100 text-emerald-700')
-                    : (dark ? 'bg-white/10 text-slate-400' : 'bg-gray-100 text-gray-500')
-              }`}>{i + 1}</button>
-          ))}
-        </div>
-
-        {cur && (
-          <div className={`rounded-2xl border p-4 mb-4 ${card}`}>
-            {cur.badgeText && (
-              <span className={`inline-block text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md mb-2 ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
-                {cur.badgeText}
-              </span>
-            )}
-            <p className={`font-bold text-[15px] mb-2 ${text}`}>{cur.title}</p>
-            <p className={`text-[13.5px] leading-relaxed mb-3 ${dark ? 'text-slate-300' : 'text-gray-700'}`}>{cur.instruction}</p>
-            {cur.narration && (
-              <div className={`rounded-xl px-3 py-2.5 text-[12.5px] leading-relaxed ${dark ? 'bg-white/5 text-slate-400' : 'bg-white text-gray-500 border border-gray-100'}`}>
-                <span className="font-semibold text-violet-500">Narration: </span>{cur.narration}
-              </div>
-            )}
-          </div>
-        )}
-
-        {(tutorial.safetyTips || []).length > 0 && step === steps.length - 1 && (
-          <div className={`rounded-2xl border p-4 mb-4 ${dark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-100'}`}>
-            <p className={`font-bold text-[13px] mb-2 ${dark ? 'text-amber-300' : 'text-amber-800'}`}>Safety tips</p>
-            <ul className={`space-y-1.5 text-[12.5px] ${dark ? 'text-amber-200/90' : 'text-amber-900/80'}`}>
-              {tutorial.safetyTips.map((tip, i) => (
-                <li key={i} className="flex gap-2"><span>•</span><span>{tip}</span></li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="flex gap-2.5">
-          <button type="button" disabled={step <= 0} onClick={() => setStep(s => Math.max(0, s - 1))}
-            className={`flex-1 py-3 rounded-xl font-semibold text-[13.5px] disabled:opacity-40 ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-800'}`}>
-            Back
-          </button>
-          {step < steps.length - 1 ? (
-            <button type="button" onClick={() => setStep(s => s + 1)}
-              className="flex-1 py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-violet-600 to-indigo-600">
-              Next step
-            </button>
-          ) : (
-            <button type="button" onClick={onClose}
-              className="flex-1 py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-emerald-500 to-teal-600">
-              Done
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    <TutorialAnimPlayer
+      tutorial={tutorial}
+      onClose={onClose}
+      onBack={onBack}
+      dark={dark}
+    />
   );
 }
 
