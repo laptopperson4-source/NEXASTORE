@@ -847,7 +847,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
 
   // NexaPay: self-hosted USDT (Polygon) widget + worker
-  const widgetSrc = '/nexapay-widget.html?amount=' + encodeURIComponent(price.toFixed(2)) + (email ? ('&email=' + encodeURIComponent(email)) : '');
+  const widgetSrc = '/nexapay-widget.html?v=2&amount=' + encodeURIComponent(price.toFixed(2)) + (email ? ('&email=' + encodeURIComponent(email)) : '');
 
   useEffect(() => {
     function onMessage(event) {
