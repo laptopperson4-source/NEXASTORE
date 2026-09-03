@@ -9,182 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script>
-    // ============================================================
-    // NexaPay widget — amount is LOCKED from parent query string
-    // and cannot be changed (including via DevTools on form fields).
-    // ============================================================
-    const CONFIG = Object.freeze({
-      WORKER_URL: "https://nexapay-gateway.laptopperson4.workers.dev",
-      METAMASK_ADDRESS: "0xF8720081dc56427AB7851fda9F05754304f0bfb2",
-      MIN_AMOUNT: 1,
-      POLL_INTERVAL_MS: 8000,
-    });
-
-    // Locked amount + email from URL only (set once, never from editable inputs)
-    const _params = new URLSearchParams(location.search);
-    const LOCKED_AMOUNT = (function () {
-      const a = parseFloat(_params.get("amount"));
-      if (!a || !(a >= CONFIG.MIN_AMOUNT) || !isFinite(a)) return null;
-      // Normalize to 2 decimals — this value is the only amount ever used
-      return Math.round(a * 100) / 100;
-    })();
-    const LOCKED_EMAIL = (_params.get("email") || "").trim();
-    const PRESET_ORDER_ID = (_params.get("orderId") || "").trim() || null;
-
-    Object.freeze({ amount: LOCKED_AMOUNT, email: LOCKED_EMAIL, orderId: PRESET_ORDER_ID });
-
-    (function initLockedUI() {
-      const amountEl = document.getElementById("amount");
-      const displayEl = document.getElementById("display-amount");
-      if (LOCKED_AMOUNT != null) {
-        const fixed = LOCKED_AMOUNT.toFixed(2);
-        if (amountEl) {
-          amountEl.value = fixed;
-          amountEl.type = "hidden";
-          amountEl.readOnly = true;
-          amountEl.setAttribute("readonly", "readonly");
-          amountEl.setAttribute("data-locked", "1");
-          // Prevent any programmatic change from stickiness on submit — we never re-read this
-        }
-        if (displayEl) displayEl.textContent = fixed;
-      } else {
-        if (displayEl) displayEl.textContent = "—";
-      }
-      const emailEl = document.getElementById("email");
-      if (emailEl && LOCKED_EMAIL) {
-        emailEl.value = LOCKED_EMAIL;
-        emailEl.readOnly = true;
-        emailEl.setAttribute("readonly", "readonly");
-      }
-      // Guard: if amount was not provided by parent, block checkout
-      if (LOCKED_AMOUNT == null) {
-        const err = document.getElementById("form-error");
-        if (err) {
-          err.textContent = "Payment amount is locked by the store and was not provided.";
-          err.classList.remove("hidden");
-        }
-        const btn = document.getElementById("pay-btn");
-        if (btn) btn.disabled = true;
-      }
-    })();
-
-    let currentOrder = null;
-    let pollTimer = null;
-    const stages = {
-      form: document.getElementById("stage-form"),
-      payment: document.getElementById("stage-payment"),
-      success: document.getElementById("stage-success"),
-    };
-    function showStage(n) {
-      Object.values(stages).forEach((el) => el.classList.remove("active"));
-      stages[n].classList.add("active");
-    }
-
-    // Always return the frozen parent amount — never trust the DOM
-    function getLockedAmount() {
-      return LOCKED_AMOUNT;
-    }
-
-    document.getElementById("copy-address").onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(CONFIG.METAMASK_ADDRESS);
-        const b = document.getElementById("copy-address");
-        b.textContent = "Copied";
-        setTimeout(() => (b.textContent = "Copy"), 1500);
-      } catch {}
-    };
-
-    document.getElementById("checkout-form").onsubmit = async (e) => {
-      e.preventDefault();
-      const err = document.getElementById("form-error");
-      err.classList.add("hidden");
-
-      const amount = getLockedAmount();
-      const email = LOCKED_EMAIL || document.getElementById("email").value.trim();
-
-      if (amount == null || !(amount >= CONFIG.MIN_AMOUNT)) {
-        err.textContent = "Amount is locked by NexaStore and is missing or invalid.";
-        err.classList.remove("hidden");
-        return;
-      }
-      if (!email) {
-        err.textContent = "Email is required";
-        err.classList.remove("hidden");
-        return;
-      }
-
-      const btn = document.getElementById("pay-btn");
-      btn.disabled = true;
-      btn.textContent = "Creating…";
-
-      try {
-        // If parent already created an order with the locked amount, reuse it
-        if (PRESET_ORDER_ID) {
-          currentOrder = { id: PRESET_ORDER_ID, amount_fiat: amount };
-        } else {
-          const res = await fetch(`${CONFIG.WORKER_URL}/api/create-order`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, amount }), // amount is LOCKED_AMOUNT only
-          });
-          const data = await res.json();
-          if (!res.ok || !data.success) throw new Error(data.error || "Failed to create order");
-          currentOrder = data.order;
-          // Reject if worker returned a different amount (tamper check)
-          const returned = parseFloat(currentOrder.amount_fiat);
-          if (isFinite(returned) && Math.abs(returned - amount) > 0.001) {
-            throw new Error("Order amount mismatch — payment blocked.");
-          }
-        }
-
-        document.getElementById("pay-amount").textContent = amount.toFixed(2);
-        document.getElementById("wallet-address").textContent = CONFIG.METAMASK_ADDRESS;
-        try {
-          if (window.QRCode) {
-            document.getElementById("qrcode").innerHTML = "";
-            new QRCode(document.getElementById("qrcode"), {
-              text: CONFIG.METAMASK_ADDRESS,
-              width: 140,
-              height: 140,
-            });
-          }
-        } catch {}
-        showStage("payment");
-        window.parent.postMessage({ type: "nexapay:payment", orderId: currentOrder.id, amount }, "*");
-        startPolling(currentOrder.id, amount);
-      } catch (ex) {
-        err.textContent = ex.message || "Could not start payment";
-        err.classList.remove("hidden");
-        btn.disabled = false;
-        btn.textContent = "Continue to payment";
-      }
-    };
-
-    function startPolling(orderId, amount) {
-      if (pollTimer) clearInterval(pollTimer);
-      const tick = async () => {
-        try {
-          await fetch(`${CONFIG.WORKER_URL}/api/check-payment?id=${orderId}&amount=${amount}`).catch(() => {});
-          const res = await fetch(`${CONFIG.WORKER_URL}/api/order-status?id=${orderId}`);
-          const data = await res.json();
-          if (data && (data.status === "completed" || data.order?.status === "completed")) {
-            clearInterval(pollTimer);
-            const paidAmount = Number(data.order?.amount_fiat ?? amount);
-            document.getElementById("receipt-amount").textContent = paidAmount.toFixed(2) + " USDT";
-            showStage("success");
-            window.parent.postMessage({
-              type: "nexapay:success",
-              orderId: (data.order && data.order.id) || orderId,
-              amount: paidAmount,
-            }, "*");
-          }
-        } catch {}
-      };
-      tick();
-      pollTimer = setInterval(tick, CONFIG.POLL_INTERVAL_MS);
-    }
-  </script>
+  
   <style>
     body { margin: 0; font-family: Inter, system-ui, sans-serif; background: transparent; -webkit-font-smoothing: antialiased; }
     .stage { display: none; }
@@ -223,7 +48,7 @@
         <div>
           <p class="text-xs text-gray-500">You pay</p>
           <p class="text-2xl font-bold tabular-nums text-white">
-            <span id="display-amount">49.99</span>
+            <span id="display-amount">—</span>
             <span class="text-sm font-semibold text-brand-400">USDT</span>
           </p>
         </div>
@@ -238,7 +63,7 @@
         </div>
 
         <!-- Optional: allow amount override if not fixed by parent page -->
-        <input type="hidden" id="amount" value="49.99" />
+        <input type="hidden" id="amount" value="" readonly data-locked="1" />
 
         <button type="submit" id="pay-btn"
           class="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 text-sm font-semibold text-white hover:opacity-95 transition disabled:opacity-50 flex items-center justify-center gap-2">
@@ -254,7 +79,7 @@
     <div id="stage-payment" class="stage px-4 py-4">
       <p class="text-center text-xs text-gray-500 mb-1">Send exactly</p>
       <p class="text-center text-2xl font-bold tabular-nums text-white mb-3">
-        <span id="pay-amount">49.99</span> <span class="text-base text-brand-400">USDT</span>
+        <span id="pay-amount">—</span> <span class="text-base text-brand-400">USDT</span>
       </p>
 
       <div class="flex justify-center mb-3">
@@ -300,125 +125,187 @@
     </div>
   </div>
 
-  <script>
-    // ============================================================
-    // CONFIG — set WORKER_URL after deploy
-    // Parent page can also pass amount via query: ?amount=49.99
-    // ============================================================
-    const CONFIG = {
-      WORKER_URL: "https://nexapay-gateway.laptopperson4.workers.dev",
-      METAMASK_ADDRESS: "0xF8720081dc56427AB7851fda9F05754304f0bfb2",
-      MIN_AMOUNT: 1,
-      POLL_INTERVAL_MS: 8000,
-    };
+  
 
-    // Allow parent / URL to set amount and email
-    (function initFromQuery() {
-      const params = new URLSearchParams(location.search);
-      const fromQuery = parseFloat(params.get("amount"));
-      if (fromQuery && fromQuery >= CONFIG.MIN_AMOUNT) {
-        document.getElementById("amount").value = fromQuery.toFixed(2);
-        document.getElementById("display-amount").textContent = fromQuery.toFixed(2);
-      }
-      const email = params.get("email");
-      if (email) {
-        const el = document.getElementById("email");
-        if (el) {
-          el.value = email;
-          el.readOnly = true;
-        }
-      }
-    })();
+<script>
+(function () {
+  "use strict";
+  const CONFIG = Object.freeze({
+    WORKER_URL: "https://nexapay-gateway.laptopperson4.workers.dev",
+    METAMASK_ADDRESS: "0xF8720081dc56427AB7851fda9F05754304f0bfb2",
+    MIN_AMOUNT: 1,
+    POLL_INTERVAL_MS: 8000,
+  });
 
-    let currentOrder = null;
-    let pollTimer = null;
-    const stages = {
-      form: document.getElementById("stage-form"),
-      payment: document.getElementById("stage-payment"),
-      success: document.getElementById("stage-success"),
-    };
-    function showStage(n) {
-      Object.values(stages).forEach((el) => el.classList.remove("active"));
-      stages[n].classList.add("active");
+  const params = new URLSearchParams(location.search);
+  const rawAmount = parseFloat(params.get("amount"));
+  const LOCKED_AMOUNT = (isFinite(rawAmount) && rawAmount >= CONFIG.MIN_AMOUNT)
+    ? Math.round(rawAmount * 100) / 100
+    : null;
+  const LOCKED_EMAIL = (params.get("email") || "").trim();
+  const PRESET_ORDER_ID = (params.get("orderId") || "").trim() || null;
+
+  function applyAmountEverywhere(amount) {
+    const fixed = amount == null ? "—" : amount.toFixed(2);
+    const display = document.getElementById("display-amount");
+    const hidden = document.getElementById("amount");
+    const payAmt = document.getElementById("pay-amount");
+    if (display) display.textContent = fixed;
+    if (payAmt) payAmt.textContent = fixed;
+    if (hidden) {
+      hidden.value = amount == null ? "" : fixed;
+      hidden.readOnly = true;
+      hidden.setAttribute("readonly", "readonly");
+      hidden.setAttribute("data-locked", "1");
+      try { hidden.type = "hidden"; } catch (e) {}
     }
+  }
 
-    document.getElementById("copy-address").onclick = async () => {
+  applyAmountEverywhere(LOCKED_AMOUNT);
+
+  const emailEl = document.getElementById("email");
+  if (emailEl && LOCKED_EMAIL) {
+    emailEl.value = LOCKED_EMAIL;
+    emailEl.readOnly = true;
+    emailEl.setAttribute("readonly", "readonly");
+  }
+
+  const formError = document.getElementById("form-error");
+  const payBtn = document.getElementById("pay-btn");
+  if (LOCKED_AMOUNT == null) {
+    if (formError) {
+      formError.textContent = "Payment amount missing from store. Close and try again.";
+      formError.classList.remove("hidden");
+    }
+    if (payBtn) payBtn.disabled = true;
+  }
+
+  let currentOrder = null;
+  let pollTimer = null;
+  const stages = {
+    form: document.getElementById("stage-form"),
+    payment: document.getElementById("stage-payment"),
+    success: document.getElementById("stage-success"),
+  };
+  function showStage(n) {
+    Object.values(stages).forEach(function (el) { if (el) el.classList.remove("active"); });
+    if (stages[n]) stages[n].classList.add("active");
+  }
+
+  const copyBtn = document.getElementById("copy-address");
+  if (copyBtn) {
+    copyBtn.onclick = async function () {
       try {
         await navigator.clipboard.writeText(CONFIG.METAMASK_ADDRESS);
-        const b = document.getElementById("copy-address");
-        b.textContent = "Copied";
-        setTimeout(() => (b.textContent = "Copy"), 1500);
-      } catch {}
+        copyBtn.textContent = "Copied";
+        setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+      } catch (e) {}
     };
+  }
 
-    document.getElementById("checkout-form").onsubmit = async (e) => {
+  const form = document.getElementById("checkout-form");
+  if (form) {
+    form.onsubmit = async function (e) {
       e.preventDefault();
-      const email = document.getElementById("email").value.trim();
-      const amount = parseFloat(document.getElementById("amount").value);
       const err = document.getElementById("form-error");
-      err.classList.add("hidden");
-      if (!email || !amount || amount < CONFIG.MIN_AMOUNT) {
-        err.textContent = "Valid email and amount required";
-        err.classList.remove("hidden");
+      if (err) err.classList.add("hidden");
+
+      // ONLY locked amount from URL — never DOM
+      const amount = LOCKED_AMOUNT;
+      const email = LOCKED_EMAIL || (emailEl && emailEl.value.trim()) || "";
+
+      if (amount == null || !(amount >= CONFIG.MIN_AMOUNT)) {
+        if (err) {
+          err.textContent = "Amount is locked by NexaStore and is missing or invalid.";
+          err.classList.remove("hidden");
+        }
         return;
       }
+      if (!email) {
+        if (err) {
+          err.textContent = "Email is required";
+          err.classList.remove("hidden");
+        }
+        return;
+      }
+
       const btn = document.getElementById("pay-btn");
-      btn.disabled = true;
-      btn.textContent = "Creating…";
+      if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
 
       try {
-        const res = await fetch(`${CONFIG.WORKER_URL}/api/create-order`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, amount }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || "Failed");
+        if (PRESET_ORDER_ID) {
+          currentOrder = { id: PRESET_ORDER_ID, amount_fiat: amount };
+        } else {
+          const res = await fetch(CONFIG.WORKER_URL + "/api/create-order", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email, amount: amount }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) throw new Error(data.error || "Failed to create order");
+          currentOrder = data.order;
+          const returned = parseFloat(currentOrder.amount_fiat);
+          if (isFinite(returned) && Math.abs(returned - amount) > 0.001) {
+            throw new Error("Order amount mismatch — payment blocked.");
+          }
+        }
 
-        currentOrder = data.order;
-        document.getElementById("pay-amount").textContent = amount.toFixed(2);
-        document.getElementById("wallet-address").textContent = CONFIG.METAMASK_ADDRESS;
-
-        const qr = document.getElementById("qrcode");
-        qr.innerHTML = "";
-        new QRCode(qr, {
-          text: CONFIG.METAMASK_ADDRESS,
-          width: 160,
-          height: 160,
-          colorDark: "#0a0b10",
-          colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.M,
-        });
-
+        applyAmountEverywhere(amount);
+        var walletEl = document.getElementById("wallet-address");
+        if (walletEl) walletEl.textContent = CONFIG.METAMASK_ADDRESS;
+        try {
+          if (window.QRCode) {
+            var qr = document.getElementById("qrcode");
+            if (qr) {
+              qr.innerHTML = "";
+              new QRCode(qr, { text: CONFIG.METAMASK_ADDRESS, width: 140, height: 140 });
+            }
+          }
+        } catch (e) {}
         showStage("payment");
-        window.parent.postMessage({ type: "nexapay:payment", orderId: currentOrder.id }, "*");
+        window.parent.postMessage({ type: "nexapay:payment", orderId: currentOrder.id, amount: amount }, "*");
         startPolling(currentOrder.id, amount);
       } catch (ex) {
-        err.textContent = ex.message || "Error";
-        err.classList.remove("hidden");
-        btn.disabled = false;
-        btn.textContent = "Continue to Payment";
+        if (err) {
+          err.textContent = ex.message || "Could not start payment";
+          err.classList.remove("hidden");
+        }
+        if (btn) { btn.disabled = false; btn.textContent = "Continue to payment"; }
       }
     };
+  }
 
-    function startPolling(orderId, amount) {
-      stopPolling();
-      pollTimer = setInterval(async () => {
-        try {
-          await fetch(`${CONFIG.WORKER_URL}/api/check-payment?id=${orderId}&amount=${amount}`).catch(() => {});
-          const res = await fetch(`${CONFIG.WORKER_URL}/api/order-status?id=${orderId}`);
-          const data = await res.json();
-          if (data.order?.status === "completed") {
-            stopPolling();
-            document.getElementById("receipt-amount").textContent = Number(data.order.amount_fiat).toFixed(2) + " USDT";
-            document.getElementById("receipt-order").textContent = data.order.id.slice(0, 13) + "…";
-            showStage("success");
-            window.parent.postMessage({ type: "nexapay:success", orderId: data.order.id }, "*");
+  function startPolling(orderId, amount) {
+    if (pollTimer) clearInterval(pollTimer);
+    async function tick() {
+      try {
+        await fetch(CONFIG.WORKER_URL + "/api/check-payment?id=" + orderId + "&amount=" + amount).catch(function () {});
+        var res = await fetch(CONFIG.WORKER_URL + "/api/order-status?id=" + orderId);
+        var data = await res.json();
+        var status = data.status || (data.order && data.order.status);
+        if (status === "completed") {
+          clearInterval(pollTimer);
+          var paidAmount = Number((data.order && data.order.amount_fiat) != null ? data.order.amount_fiat : amount);
+          var receipt = document.getElementById("receipt-amount");
+          if (receipt) receipt.textContent = paidAmount.toFixed(2) + " USDT";
+          var receiptOrder = document.getElementById("receipt-order");
+          if (receiptOrder && data.order && data.order.id) {
+            receiptOrder.textContent = data.order.id.slice(0, 13) + "…";
           }
-        } catch {}
-      }, CONFIG.POLL_INTERVAL_MS);
+          showStage("success");
+          window.parent.postMessage({
+            type: "nexapay:success",
+            orderId: (data.order && data.order.id) || orderId,
+            amount: paidAmount,
+          }, "*");
+        }
+      } catch (e) {}
     }
-    function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-  </script>
+    tick();
+    pollTimer = setInterval(tick, CONFIG.POLL_INTERVAL_MS);
+  }
+})();
+</script>
+
 </body>
 </html>
