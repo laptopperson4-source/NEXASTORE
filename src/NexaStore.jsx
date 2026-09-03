@@ -628,7 +628,10 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
                     : `${card} hover:border-violet-300`}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
+                        <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                      </div>
                       <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                       <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
                     </div>
@@ -738,6 +741,42 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
             <p className={"text-[10px] font-semibold " + subtext}>USDT</p>
           </div>
         </div>
+
+        {(() => {
+          const linked = wallet && RECOMMENDED_WALLETS.find(w => w.id === wallet.provider || w.name === wallet.name);
+          if (wallet && linked) {
+            return (
+              <div className={"mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 flex-shrink-0 border " + (dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100')}>
+                <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className={"text-[12px] font-semibold " + (dark ? 'text-emerald-300' : 'text-emerald-800')}>{wallet.name} · NexaStore wallet</p>
+                  <p className={"text-[11px] truncate " + subtext}>{wallet.address}</p>
+                </div>
+                <a href={linked.url} target="_blank" rel="noopener noreferrer"
+                  className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90">
+                  Open {wallet.name} <ExternalLink size={12} />
+                </a>
+              </div>
+            );
+          }
+          if (wallet) {
+            return (
+              <div className={"mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 flex-shrink-0 border " + (dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100')}>
+                <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className={"text-[12px] font-semibold " + (dark ? 'text-emerald-300' : 'text-emerald-800')}>{wallet.name} · NexaStore wallet</p>
+                  <p className={"text-[11px] truncate " + subtext}>{wallet.address}</p>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <button type="button" onClick={onNeedWallet}
+              className={"mx-4 mb-2 w-auto rounded-xl border-2 border-dashed px-3 py-2.5 text-[12.5px] font-semibold flex items-center justify-center gap-2 " + (dark ? 'border-violet-400/40 text-violet-300 hover:bg-violet-500/10' : 'border-violet-300 text-violet-600 hover:bg-violet-50')}>
+              <Wallet size={15} /> Connect NexaStore wallet to open it here
+            </button>
+          );
+        })()}
 
         <div className="flex-1 min-h-0 px-2 pb-2">
           <iframe
@@ -849,7 +888,10 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
                 <Wallet size={18} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                </div>
                 <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                 <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
               </div>
