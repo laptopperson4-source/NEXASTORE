@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import TutorialAnimPlayer from './TutorialAnimPlayer.jsx';
+import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
 import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -593,13 +593,13 @@ function FileDropField({ label, hint, icon: Icon, accept, multiple, onChange, fi
 
 
 function TutorialViewer({ tutorial, onClose, onBack, dark }) {
-  // Full animated wallet UI + moving cursor + voiceover (from tutorial tool design)
+  // AI Studio–style animated wallet UI (cursor, highlights, voiceover)
   return (
-    <TutorialAnimPlayer
+    <StudioTutorialPlayer
       tutorial={tutorial}
       onClose={onClose}
       onBack={onBack}
-      dark={dark}
+      dark={dark !== false}
     />
   );
 }
