@@ -580,17 +580,8 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
     setError('');
     const addr = address.trim();
     if (!selected) { setError('Pick a recommended wallet first.'); return; }
-    if (!addr || addr.length < 10) { setError('Enter a valid wallet address (or use “Demo connect”).'); return; }
+    if (!addr || addr.length < 10) { setError('Enter a valid wallet address from your wallet app.'); return; }
     const wallet = { provider: selected.id, name: selected.name, address: addr, connectedAt: Date.now() };
-    setStoredWallet(wallet);
-    onConnected?.(wallet);
-    onClose();
-  };
-
-  const demoConnect = () => {
-    if (!selected) { setError('Pick a recommended wallet first.'); return; }
-    const demo = `0xNexa${Math.random().toString(16).slice(2, 10)}…${Math.random().toString(16).slice(2, 6)}`;
-    const wallet = { provider: selected.id, name: selected.name, address: demo, connectedAt: Date.now(), demo: true };
     setStoredWallet(wallet);
     onConnected?.(wallet);
     onClose();
@@ -653,13 +644,9 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
 
           {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
 
-          <div className="flex gap-2.5 pt-1 pb-2">
-            <button type="button" onClick={demoConnect}
-              className={`flex-1 py-3 rounded-xl font-semibold text-[13.5px] ${dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              Demo connect
-            </button>
+          <div className="pt-1 pb-2">
             <button type="button" onClick={connect}
-              className="flex-1 py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90">
+              className="w-full py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90">
               Connect wallet
             </button>
           </div>
