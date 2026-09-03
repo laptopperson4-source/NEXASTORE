@@ -593,12 +593,32 @@ function FileDropField({ label, hint, icon: Icon, accept, multiple, onChange, fi
 
 function TutorialViewer({ tutorial, onClose, onBack, dark }) {
   const [step, setStep] = useState(0);
+  const [videoUrl, setVideoUrl] = useState(null);
   const steps = tutorial?.steps || [];
   const cur = steps[step] || null;
   const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
   const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100';
+
+  useEffect(() => {
+    let cancelled = false;
+    setVideoUrl(null);
+    if (!tutorial?.id) return;
+    fetch('/tutorials/videos/manifest.json')
+      .then(r => r.ok ? r.json() : {})
+      .then(m => {
+        if (!cancelled && m && m[tutorial.id]) setVideoUrl(m[tutorial.id]);
+      })
+      .catch(() => {});
+    // Fallback direct path
+    const direct = `/tutorials/videos/${tutorial.id}.mp4`;
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = direct;
+    v.onloadedmetadata = () => { if (!cancelled) setVideoUrl(direct); };
+    return () => { cancelled = true; };
+  }, [tutorial?.id]);
 
   if (!tutorial) return null;
 
@@ -619,7 +639,21 @@ function TutorialViewer({ tutorial, onClose, onBack, dark }) {
 
       <div className="max-w-lg mx-auto px-4 py-5">
         <h1 className={`font-extrabold text-[17px] leading-snug mb-1 ${text}`}>{tutorial.title}</h1>
-        {tutorial.subtitle && <p className={`text-[13px] mb-4 ${subtext}`}>{tutorial.subtitle}</p>}
+        {tutorial.subtitle && <p className={`text-[13px] mb-3 ${subtext}`}>{tutorial.subtitle}</p>}
+
+        {videoUrl && (
+          <div className={`rounded-2xl overflow-hidden border mb-4 ${dark ? 'border-white/10' : 'border-gray-200'}`}>
+            <video
+              key={videoUrl}
+              src={videoUrl}
+              controls
+              playsInline
+              className="w-full bg-black aspect-[9/16] max-h-[420px] object-contain"
+              poster=""
+            />
+            <p className={`text-[11px] px-3 py-2 ${subtext}`}>Video guide · USDT on Polygon only</p>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
           {steps.map((s, i) => (
@@ -744,7 +778,7 @@ function TutorialHub({ onClose, onOpenTutorial, dark, initialTutorials }) {
                     <p className={`font-bold text-[13.5px] ${text}`}>{tut.walletName}</p>
                     <p className={`text-[12px] mt-0.5 line-clamp-2 ${subtext}`}>{tut.title}</p>
                     <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>
-                      {(tut.steps || []).length} steps · {tut.networkName || 'USDT'}
+                      {(tut.steps || []).length} steps · Video · {tut.networkName || 'USDT'}
                     </p>
                   </div>
                   <ChevronRight size={16} className={`mt-1 flex-shrink-0 ${subtext}`} />

@@ -1,0 +1,18 @@
+{
+  "metamask-eth-ext": "/tutorials/videos/metamask-eth-ext.mp4",
+  "phantom-sol-ext": "/tutorials/videos/phantom-sol-ext.mp4",
+  "rabby-eth-ext": "/tutorials/videos/rabby-eth-ext.mp4",
+  "keplr-cosmos-ext": "/tutorials/videos/keplr-cosmos-ext.mp4",
+  "trust-btc-mob": "/tutorials/videos/trust-btc-mob.mp4",
+  "coinbase-eth-mob": "/tutorials/videos/coinbase-eth-mob.mp4",
+  "rainbow-eth-mob": "/tutorials/videos/rainbow-eth-mob.mp4",
+  "solflare-sol-mob": "/tutorials/videos/solflare-sol-mob.mp4",
+  "ledger-eth-hw": "/tutorials/videos/ledger-eth-hw.mp4",
+  "trezor-btc-hw": "/tutorials/videos/trezor-btc-hw.mp4",
+  "tangem-eth-hw": "/tutorials/videos/tangem-eth-hw.mp4",
+  "keystone-btc-hw": "/tutorials/videos/keystone-btc-hw.mp4",
+  "exodus-eth-soft": "/tutorials/videos/exodus-eth-soft.mp4",
+  "electrum-btc-soft": "/tutorials/videos/electrum-btc-soft.mp4",
+  "sparrow-btc-soft": "/tutorials/videos/sparrow-btc-soft.mp4",
+  "atomic-eth-soft": "/tutorials/videos/atomic-eth-soft.mp4"
+}
