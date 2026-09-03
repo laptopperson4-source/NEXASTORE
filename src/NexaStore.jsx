@@ -247,6 +247,34 @@ function publicDevName(profile) {
   return (profile.developer_name || profile.company_name || '').trim();
 }
 
+async function enrichAppsWithDevelopers(apps) {
+  if (!apps || !apps.length) return apps || [];
+  const ids = [...new Set(apps.map(a => a.dev_id).filter(Boolean))];
+  if (!ids.length) return apps;
+  let byId = {};
+  try {
+    const profs = await sbSelect('profiles', `id=in.(${ids.join(',')})&select=id,email,developer_name,company_name`);
+    for (const pr of (profs || [])) {
+      byId[pr.id] = pr.developer_name || pr.company_name || (pr.email ? pr.email.split('@')[0] : null);
+    }
+  } catch {
+    for (const id of ids) {
+      const local = getLocalDevProfile(id);
+      if (local?.developer_name) byId[id] = local.developer_name;
+    }
+  }
+  for (const id of ids) {
+    if (!byId[id]) {
+      const local = getLocalDevProfile(id);
+      if (local?.developer_name) byId[id] = local.developer_name;
+    }
+  }
+  return apps.map(a => ({
+    ...a,
+    developer_name: a.developer_name || byId[a.dev_id] || null,
+  }));
+}
+
 function BannerCarousel({ rounded = 'rounded-[28px]', maxHeight = '360px', dotBottom = 'bottom-5' }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
@@ -993,6 +1021,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         total_size_bytes: appFile.size,
         status: 'pending',
         dev_id: profile.id,
+        developer_name: publicDevName(profile) || null,
       }, session);
       appId = inserted[0].id;
 
@@ -1232,7 +1261,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
             <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
               <select value={formData.category} onChange={set('category')} className={inputCls}>
                 {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -1243,7 +1272,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             </div>
             <p className={`text-[11.5px] -mt-1 ${subtext}`}>Set a USDT price to enable a paywall. Buyers pay once, then can install forever.</p>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
               <input type="text" placeholder="Version (e.g. 1.0.0)" value={formData.version} onChange={set('version')} className={inputCls} />
               <input type="text" placeholder="Release notes" value={formData.releaseNotes} onChange={set('releaseNotes')} className={inputCls} />
             </div>
@@ -1844,64 +1873,70 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
   );
 }
 
-function AppCard({ app, index, onOpen, onInstall, installState, owned }) {
+function AppCard({ app, index, onOpen, onInstall, installState, owned, dark }) {
   const fallbackTheme = cardThemes[index % cardThemes.length];
-  const logoGradient = useLogoGradient(app.logo_url);
   const Icon = categoryIconMap[app.category] || Package;
-  const sizeMB = app.total_size_bytes ? (app.total_size_bytes / 1024 / 1024).toFixed(1) : '—';
   const installing = installState?.appId === app.id;
   const pct = installing ? Math.round((installState.progress || 0) * 100) : 0;
   const price = parseFloat(app.price) || 0;
   const isPaid = price > 0;
   const unlocked = !isPaid || owned;
+  const rating = app.rating || app.avg_rating || null;
+  const developerName = app.developer_name || app.company_name || app.dev_name || null;
 
-  const cardProps = logoGradient
-    ? { style: { background: logoGradient.css } }
-    : { className: `bg-gradient-to-br ${fallbackTheme.grad}` };
+  const titleCls = dark ? 'text-white' : 'text-gray-900';
+  const subCls = dark ? 'text-slate-400' : 'text-gray-500';
+  const ratingCls = dark ? 'text-slate-300' : 'text-gray-700';
 
   const btnLabel = installing
-    ? <><Loader2 size={13} className="animate-spin" /> {pct}%</>
+    ? <><Loader2 size={12} className="animate-spin" /> {pct}%</>
     : unlocked
       ? 'Install'
-      : <><Lock size={12} /> {price.toFixed(2)} USDT</>;
+      : <><Lock size={11} /> {price.toFixed(2)}</>;
 
   return (
-    <div {...cardProps} className={`${cardProps.className || ''} rounded-3xl p-4 sm:p-5 flex flex-col justify-between shadow-sm hover:shadow-lg transition-shadow`}>
-      <button onClick={() => onOpen(app)} className="text-left flex-1">
-        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white flex items-center justify-center mb-3 sm:mb-4 mx-auto shadow-sm overflow-hidden">
+    <div className="flex flex-col items-stretch group">
+      <button type="button" onClick={() => onOpen(app)} className="text-left flex flex-col items-stretch">
+        {/* Square logo — Play Store style */}
+        <div className={`w-full aspect-square max-w-[120px] mx-auto rounded-[22%] overflow-hidden shadow-sm bg-gradient-to-br ${fallbackTheme.grad} flex items-center justify-center`}>
           {app.logo_url ? (
             <img src={app.logo_url} alt={app.name} className="w-full h-full object-cover" />
           ) : (
-            <Icon size={22} className={fallbackTheme.icon} strokeWidth={2.2} />
+            <Icon size={36} className="text-white" strokeWidth={2} />
           )}
         </div>
-        <h3 className="font-bold text-white text-sm sm:text-base leading-tight mb-0.5 truncate">{app.name}</h3>
-        <p className="text-white/75 text-xs sm:text-sm mb-2 sm:mb-3">{app.category}</p>
-        <div className="flex items-center gap-2 text-white text-xs mb-3 sm:mb-4 flex-wrap">
-          {app.rating ? (
-            <>
-              <span className="inline-flex items-center gap-1">
-                <Star size={12} className="fill-yellow-300 text-yellow-300" />
-                <span className="font-semibold">{app.rating}</span>
-              </span>
-              <span className="text-white/60">•</span>
-            </>
-          ) : null}
-          <span className="text-white/80">{sizeMB} MB</span>
-          {isPaid && (
-            <>
-              <span className="text-white/60">•</span>
-              <span className="font-bold text-emerald-200">{price.toFixed(2)} USDT</span>
-            </>
+        <div className="mt-2.5 px-0.5 min-w-0">
+          <h3 className={`font-medium text-[13px] sm:text-[13.5px] leading-snug line-clamp-2 ${titleCls}`}>{app.name}</h3>
+          {developerName && (
+            <p className={`text-[11.5px] mt-0.5 truncate ${subCls}`}>{developerName}</p>
           )}
+          <div className={`flex items-center gap-1 mt-1 text-[11.5px] ${ratingCls}`}>
+            {rating ? (
+              <>
+                <span className="font-medium tabular-nums">{Number(rating).toFixed(1)}</span>
+                <Star size={11} className="fill-gray-500 text-gray-500" style={dark ? { fill: '#94a3b8', color: '#94a3b8' } : undefined} />
+              </>
+            ) : (
+              <span className={subCls}>New</span>
+            )}
+            {isPaid && (
+              <span className={`ml-1 font-semibold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>{price.toFixed(2)} USDT</span>
+            )}
+          </div>
         </div>
       </button>
-      <button onClick={() => !installing && onInstall(app)} disabled={installing}
-        className={`relative w-full overflow-hidden ${logoGradient ? 'bg-black/25' : fallbackTheme.btn} text-white py-2 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors ${!installing && (logoGradient ? 'hover:bg-black/35' : '')}`}>
-        {installing && <div className="absolute inset-y-0 left-0 bg-white/25 transition-all duration-150" style={{ width: `${pct}%` }} />}
-        <span className="relative flex items-center justify-center gap-1.5">
-          {btnLabel}
-        </span>
+      <button
+        type="button"
+        onClick={() => !installing && onInstall(app)}
+        disabled={installing}
+        className={`relative mt-2.5 w-full overflow-hidden py-1.5 rounded-full text-[12px] font-semibold transition-colors ${
+          dark
+            ? 'bg-white/10 text-white hover:bg-white/15'
+            : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+        }`}
+      >
+        {installing && <div className="absolute inset-y-0 left-0 bg-violet-500/30 transition-all duration-150" style={{ width: `${pct}%` }} />}
+        <span className="relative flex items-center justify-center gap-1">{btnLabel}</span>
       </button>
     </div>
   );
@@ -2171,7 +2206,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                     <h2 className="text-[19px] font-extrabold text-gray-900">Recommended for You</h2>
                     <button onClick={() => setView('discover')} className="text-blue-600 font-semibold hover:text-blue-700 text-[13.5px]">View all</button>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                     {filteredApps.slice(0, 5).map((app, i) => (
                       <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
                     ))}
@@ -2200,7 +2235,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                     <h2 className="text-[19px] font-extrabold text-gray-900">New &amp; Updated</h2>
                     <button onClick={() => setView('updates')} className="text-blue-600 font-semibold hover:text-blue-700 text-[13.5px]">View all</button>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                     {filteredApps.slice(5, 10).map((app, i) => (
                       <AppCard key={app.id} app={app} index={i + 2} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
                     ))}
@@ -2212,7 +2247,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
             {(view === 'discover' || view === 'charts') && (
               <div>
                 <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">{viewTitles[view]}</h2>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                   {filteredApps.map((app, i) => (
                     <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
                   ))}
@@ -2237,7 +2272,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                   {(selectedCategory ? filteredApps.filter(a => a.category === selectedCategory) : filteredApps).map((app, i) => (
                     <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
                   ))}
@@ -2290,7 +2325,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                   <p className="text-center py-16 text-gray-400 text-sm">Loading your wishlist…</p>
                 )}
                 {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                     {wishlistApps.map((app, i) => (
                       <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
                     ))}
@@ -2439,9 +2474,9 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               <h2 className="text-[16px] font-extrabold text-white">Recommended for You</h2>
               <button onClick={() => setView('charts')} className="text-violet-400 text-[12.5px] font-semibold">See all</button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
               {filteredApps.slice(0, 4).map((app, i) => (
-                <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
+                <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={true} />
               ))}
             </div>
           </div>
@@ -2527,9 +2562,9 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-x-3 gap-y-5">
             {(selectedCategory ? filteredApps.filter(a => a.category === selectedCategory) : filteredApps).map((app, i) => (
-              <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
+              <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={true} />
             ))}
           </div>
         </div>
@@ -2628,9 +2663,9 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
             <p className="text-center py-10 text-slate-500 text-sm">Loading your wishlist…</p>
           )}
           {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
               {wishlistApps.map((app, i) => (
-                <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} />
+                <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={true} />
               ))}
             </div>
           ) : (!(view === 'wishlist' && wishlistLoading) && (
@@ -2673,7 +2708,7 @@ export default function NexaStore() {
     async function init() {
       try {
         const apps = await sbSelect('apps', 'status=eq.approved&select=*&order=created_at.desc&limit=50');
-        setAllApps(apps);
+        setAllApps(await enrichAppsWithDevelopers(apps || []));
       } catch (e) {
         console.error('Failed to load apps:', e);
       } finally {
@@ -2809,7 +2844,7 @@ export default function NexaStore() {
   const refreshApps = async () => {
     try {
       const apps = await sbSelect('apps', 'status=eq.approved&select=*&order=created_at.desc&limit=50');
-      setAllApps(apps);
+      setAllApps(await enrichAppsWithDevelopers(apps || []));
     } catch (e) {
       console.error('Failed to refresh apps:', e);
     }
