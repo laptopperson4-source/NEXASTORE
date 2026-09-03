@@ -931,6 +931,28 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
   return (
     <div className="fixed inset-0 z-[160] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <style>{`
+        #nexapay-receipt-email {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+          -webkit-text-fill-color: #f8fafc !important;
+          caret-color: #f8fafc !important;
+        }
+        #nexapay-receipt-email::placeholder {
+          color: #94a3b8 !important;
+          -webkit-text-fill-color: #94a3b8 !important;
+        }
+        #nexapay-receipt-email:-webkit-autofill,
+        #nexapay-receipt-email:-webkit-autofill:hover,
+        #nexapay-receipt-email:-webkit-autofill:focus,
+        #nexapay-receipt-email:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px #1e293b inset !important;
+          box-shadow: 0 0 0 1000px #1e293b inset !important;
+          -webkit-text-fill-color: #f8fafc !important;
+          caret-color: #f8fafc !important;
+          transition: background-color 99999s ease-out;
+        }
+      `}</style>
       <div className={`w-full max-w-[420px] max-h-[92vh] overflow-auto rounded-2xl border shadow-2xl ${bg} ${dark ? 'border-white/10' : 'border-gray-200'}`}
         onClick={(e) => e.stopPropagation()} style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
         <div className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b ${dark ? 'border-white/10 bg-[#0f172a]' : 'border-gray-100 bg-white'}`}>
@@ -1000,23 +1022,45 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 </div>
 
                 <div>
-                  <label className={`block text-[11px] mb-1 ${subtext}`} htmlFor="nexapay-email">Email for receipt</label>
+                  <label className={`block text-[11px] mb-1 ${subtext}`} htmlFor="nexapay-receipt-email">Email for receipt</label>
                   <input
-                    id="nexapay-email"
-                    type="email"
-                    name="email"
+                    id="nexapay-receipt-email"
+                    type="text"
+                    inputMode="email"
+                    name="nexapay-receipt-email"
                     required
-                    autoComplete="email"
-                    autoFocus
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className={`w-full px-3 py-2.5 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-violet-500/40 ${
-                      dark
-                        ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500'
-                        : 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400'
-                    }`}
-                    style={{ colorScheme: dark ? 'dark' : 'light' }}
+                    className="w-full text-sm outline-none"
+                    style={{
+                      backgroundColor: '#1e293b',
+                      color: '#f8fafc',
+                      WebkitTextFillColor: '#f8fafc',
+                      caretColor: '#f8fafc',
+                      border: '1px solid #475569',
+                      borderRadius: '12px',
+                      padding: '10px 12px',
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      fontSize: '14px',
+                      lineHeight: 1.4,
+                      boxShadow: 'none',
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#8b5cf6';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(139,92,246,0.35)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#475569';
+                      e.target.style.boxShadow = 'none';
+                    }}
                   />
                 </div>
 
