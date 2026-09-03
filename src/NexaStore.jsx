@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
 const REST = `${SUPABASE_URL}/rest/v1`;
@@ -702,7 +703,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   );
 }
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onSignOut, onOpenAuth, dark }) {
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onSignOut, onOpenAuth, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const bg = dark ? 'bg-transparent' : 'bg-transparent';
   const text = dark ? 'text-white' : 'text-gray-900';
@@ -823,6 +824,13 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
 
       {/* Actions */}
       <div className="space-y-2">
+        <button onClick={onOpenDeveloper}
+          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+          <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+            <Code size={18} className="text-violet-500" /> Become a Developer
+          </span>
+          <ChevronRight size={17} className={subtext} />
+        </button>
         {profile.is_owner && (
           <button onClick={onOpenAdmin}
             className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
@@ -844,7 +852,10 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
   );
 }
 
-function DevConsole({ session, profile, onClose, onPublished, dark }) {
+function DevConsole({ session, profile, onClose, onPublished, dark, showToast }) {
+  const [tab, setTab] = useState('overview');
+  const [myApps, setMyApps] = useState([]);
+  const [appsLoading, setAppsLoading] = useState(true);
   const [formData, setFormData] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
   const [appFile, setAppFile] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
@@ -853,8 +864,42 @@ function DevConsole({ session, profile, onClose, onPublished, dark }) {
   const [step, setStep] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [editingApp, setEditingApp] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
+  const [editSaving, setEditSaving] = useState(false);
 
   const set = (field) => (e) => setFormData({ ...formData, [field]: e.target.value });
+  const setEdit = (field) => (e) => setEditForm({ ...editForm, [field]: e.target.value });
+
+  const loadMyApps = async () => {
+    setAppsLoading(true);
+    try {
+      const rows = await sbSelect('apps', `dev_id=eq.${profile.id}&select=*&order=created_at.desc`, session);
+      setMyApps(rows || []);
+    } catch {
+      setMyApps([]);
+    } finally {
+      setAppsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadMyApps(); }, [session, profile?.id]);
+
+  const statusCounts = useMemo(() => {
+    const c = { approved: 0, pending: 0, rejected: 0, other: 0 };
+    for (const a of myApps) {
+      const s = (a.status || 'other').toLowerCase();
+      if (s in c) c[s]++; else c.other++;
+    }
+    return c;
+  }, [myApps]);
+
+  const chartData = useMemo(() => [
+    { name: 'Live', value: statusCounts.approved, color: '#10b981' },
+    { name: 'Pending', value: statusCounts.pending, color: '#f59e0b' },
+    { name: 'Rejected', value: statusCounts.rejected, color: '#ef4444' },
+    { name: 'Other', value: statusCounts.other, color: '#8b5cf6' },
+  ], [statusCounts]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -900,7 +945,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark }) {
       }
 
       setStep('Uploading app file…');
-      const CHUNK_SIZE = 45 * 1024 * 1024; // 45MB — safe margin under Supabase's 50MB hard cap
+      const CHUNK_SIZE = 45 * 1024 * 1024;
       const chunks = [];
       for (let offset = 0; offset < appFile.size; offset += CHUNK_SIZE) {
         chunks.push(appFile.slice(offset, offset + CHUNK_SIZE));
@@ -912,8 +957,12 @@ function DevConsole({ session, profile, onClose, onPublished, dark }) {
 
       setSuccess('Submitted! Your app is pending review before it goes live.');
       setStep('');
+      setFormData({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
+      setAppFile(null); setLogoFile(null); setScreenshots([]);
       onPublished?.();
-      setTimeout(onClose, 2000);
+      await loadMyApps();
+      setTab('apps');
+      showToast?.('App submitted for review', 'success');
     } catch (err) {
       if (appId) {
         await sbDelete('app_bits', { app_id: appId }, session).catch(() => {});
@@ -927,11 +976,60 @@ function DevConsole({ session, profile, onClose, onPublished, dark }) {
     }
   };
 
+  const startEdit = (app) => {
+    setEditingApp(app);
+    setEditForm({
+      name: app.name || '',
+      tagline: app.tagline || '',
+      description: app.description || '',
+      category: app.category || 'Tools',
+      price: String(app.price ?? 0),
+      version: app.version || '1.0.0',
+      releaseNotes: app.release_notes || '',
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editingApp) return;
+    setEditSaving(true);
+    try {
+      await sbUpdate('apps', {
+        name: editForm.name.trim(),
+        tagline: editForm.tagline.trim(),
+        description: editForm.description.trim(),
+        category: editForm.category,
+        price: parseFloat(editForm.price) || 0,
+        version: editForm.version.trim() || '1.0.0',
+        release_notes: editForm.releaseNotes.trim(),
+      }, { id: editingApp.id }, session);
+      showToast?.('App updated', 'success');
+      setEditingApp(null);
+      await loadMyApps();
+      onPublished?.();
+    } catch (e) {
+      showToast?.(e.message || 'Update failed', 'error');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-400';
   const border = dark ? 'border-white/10' : 'border-gray-100';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100';
   const inputCls = `w-full px-4 py-2.5 rounded-xl text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? 'bg-white/5 border border-white/10 text-white placeholder-slate-500' : 'bg-white border border-gray-200 text-gray-900 placeholder-gray-400'}`;
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'publish', label: 'Publish', icon: Upload },
+    { id: 'apps', label: 'My apps', icon: Package },
+  ];
+
+  const statusBadge = (status) => {
+    const s = (status || '').toLowerCase();
+    const cls = s === 'approved' ? 'bg-emerald-500/15 text-emerald-500' : s === 'pending' ? 'bg-amber-500/15 text-amber-500' : s === 'rejected' ? 'bg-red-500/15 text-red-500' : 'bg-gray-500/15 text-gray-400';
+    return <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${cls}`}>{status || 'unknown'}</span>;
+  };
 
   return (
     <div className={`fixed inset-0 z-50 overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -939,50 +1037,176 @@ function DevConsole({ session, profile, onClose, onPublished, dark }) {
         <button onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
           <ArrowLeft size={20} />
         </button>
-        <div>
-          <p className={`font-bold text-[15px] ${text} leading-tight`}>Publish an app</p>
-          <p className={`text-[11.5px] ${subtext}`}>Submitted apps are reviewed before going live</p>
+        <div className="flex-1 min-w-0">
+          <p className={`font-bold text-[15px] ${text} leading-tight`}>Developer Console</p>
+          <p className={`text-[11.5px] ${subtext}`}>Charts, publish new apps, and edit your listings</p>
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          <input type="text" placeholder="App name" value={formData.name} onChange={set('name')} className={inputCls} />
-          <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
-          <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
+      <div className={`sticky top-[57px] z-10 ${bg} border-b ${border} px-4`}>
+        <div className="max-w-3xl mx-auto flex gap-1 overflow-x-auto">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-[13px] font-semibold border-b-2 transition-colors whitespace-nowrap ${tab === id ? 'border-violet-500 text-violet-500' : `border-transparent ${subtext}`}`}>
+              <Icon size={15} /> {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <select value={formData.category} onChange={set('category')} className={inputCls}>
-              {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <div className="relative">
-              <input type="number" min="0" step="0.01" placeholder="0.00 = free" value={formData.price} onChange={set('price')} className={`${inputCls} pr-14`} />
-              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-bold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>USDT</span>
+      <div className="max-w-3xl mx-auto px-4 md:px-8 py-6">
+        {tab === 'overview' && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Total apps', value: myApps.length, color: 'text-violet-500' },
+                { label: 'Live', value: statusCounts.approved, color: 'text-emerald-500' },
+                { label: 'Pending', value: statusCounts.pending, color: 'text-amber-500' },
+                { label: 'Rejected', value: statusCounts.rejected, color: 'text-red-500' },
+              ].map(s => (
+                <div key={s.label} className={`rounded-2xl border p-4 ${card}`}>
+                  <p className={`text-[11.5px] font-semibold uppercase tracking-wide ${subtext}`}>{s.label}</p>
+                  <p className={`text-2xl font-extrabold mt-1 ${s.color}`}>{appsLoading ? '—' : s.value}</p>
+                </div>
+              ))}
             </div>
+
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`font-bold text-[14px] ${text} mb-3`}>Apps by status</p>
+              {appsLoading ? (
+                <p className={`text-[13px] ${subtext} py-10 text-center`}>Loading chart…</p>
+              ) : myApps.length === 0 ? (
+                <div className="text-center py-10">
+                  <p className={`text-[13px] ${subtext} mb-3`}>No apps yet — publish your first one.</p>
+                  <button onClick={() => setTab('publish')} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-4 py-2 rounded-xl font-semibold text-[13px]">Publish an app</button>
+                </div>
+              ) : (
+                <div className="h-56 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                      <XAxis dataKey="name" tick={{ fill: dark ? '#94a3b8' : '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fill: dark ? '#94a3b8' : '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff', color: dark ? '#fff' : '#111' }} />
+                      <Bar dataKey="value" radius={[8, 8, 4, 4]}>
+                        {chartData.map((entry, idx) => (
+                          <Cell key={idx} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <button onClick={() => setTab('publish')} className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 flex items-center justify-center gap-2">
+              <Upload size={16} /> Publish a new app
+            </button>
           </div>
-          <p className={`text-[11.5px] -mt-1 ${dark ? 'text-slate-500' : 'text-gray-400'}`}>Set a USDT price to enable a paywall. Buyers pay once, then can install forever.</p>
+        )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <input type="text" placeholder="Version (e.g. 1.0.0)" value={formData.version} onChange={set('version')} className={inputCls} />
-            <input type="text" placeholder="Release notes" value={formData.releaseNotes} onChange={set('releaseNotes')} className={inputCls} />
+        {tab === 'publish' && (
+          <form onSubmit={handleSubmit} className="space-y-3.5">
+            <input type="text" placeholder="App name" value={formData.name} onChange={set('name')} className={inputCls} />
+            <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
+            <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
+
+            <div className="grid grid-cols-2 gap-3">
+              <select value={formData.category} onChange={set('category')} className={inputCls}>
+                {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <div className="relative">
+                <input type="number" min="0" step="0.01" placeholder="0.00 = free" value={formData.price} onChange={set('price')} className={`${inputCls} pr-14`} />
+                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-bold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>USDT</span>
+              </div>
+            </div>
+            <p className={`text-[11.5px] -mt-1 ${subtext}`}>Set a USDT price to enable a paywall. Buyers pay once, then can install forever.</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <input type="text" placeholder="Version (e.g. 1.0.0)" value={formData.version} onChange={set('version')} className={inputCls} />
+              <input type="text" placeholder="Release notes" value={formData.releaseNotes} onChange={set('releaseNotes')} className={inputCls} />
+            </div>
+
+            <FileDropField label="App file" hint="APK, ZIP, or EXE" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setAppFile(e.target.files?.[0] || null)} files={appFile} dark={dark} />
+            <FileDropField label="Logo" hint="Square image, PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
+            <FileDropField label="Screenshots" hint="At least 3 images" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
+
+            {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
+            {success && <p className="text-emerald-500 text-[13px] font-medium">{success}</p>}
+            {step && !error && <p className="text-violet-500 text-[13px] font-medium">{step}</p>}
+
+            <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 text-[14px]">
+              {loading ? 'Submitting…' : 'Submit for review'}
+            </button>
+          </form>
+        )}
+
+        {tab === 'apps' && (
+          <div className="space-y-3">
+            {appsLoading && <p className={`text-center py-10 text-[13px] ${subtext}`}>Loading your apps…</p>}
+            {!appsLoading && myApps.length === 0 && (
+              <div className={`rounded-2xl border p-8 text-center ${card}`}>
+                <p className={`font-bold ${text} mb-1`}>No published apps yet</p>
+                <p className={`text-[13px] ${subtext} mb-4`}>Upload your first app from the Publish tab.</p>
+                <button onClick={() => setTab('publish')} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-4 py-2 rounded-xl font-semibold text-[13px]">Go to Publish</button>
+              </div>
+            )}
+            {myApps.map(app => (
+              <div key={app.id} className={`rounded-2xl border p-4 ${card}`}>
+                {editingApp?.id === app.id ? (
+                  <div className="space-y-2.5">
+                    <input className={inputCls} value={editForm.name} onChange={setEdit('name')} placeholder="Name" />
+                    <input className={inputCls} value={editForm.tagline} onChange={setEdit('tagline')} placeholder="Tagline" />
+                    <textarea className={`${inputCls} h-20 resize-none`} value={editForm.description} onChange={setEdit('description')} placeholder="Description" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <select className={inputCls} value={editForm.category} onChange={setEdit('category')}>
+                        {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <div className="relative">
+                        <input type="number" min="0" step="0.01" className={`${inputCls} pr-14`} value={editForm.price} onChange={setEdit('price')} />
+                        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-bold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>USDT</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className={inputCls} value={editForm.version} onChange={setEdit('version')} placeholder="Version" />
+                      <input className={inputCls} value={editForm.releaseNotes} onChange={setEdit('releaseNotes')} placeholder="Release notes" />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" onClick={() => setEditingApp(null)} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
+                      <button type="button" onClick={saveEdit} disabled={editSaving} className="flex-1 py-2.5 rounded-xl font-bold text-[13px] text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">{editSaving ? 'Saving…' : 'Save changes'}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3">
+                    {app.logo_url ? (
+                      <img src={app.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`font-bold text-[14px] truncate ${text}`}>{app.name}</p>
+                        {statusBadge(app.status)}
+                      </div>
+                      <p className={`text-[12px] ${subtext} truncate`}>{app.tagline || app.category}</p>
+                      <p className={`text-[12px] mt-0.5 font-semibold ${(parseFloat(app.price) || 0) > 0 ? 'text-emerald-500' : subtext}`}>
+                        {formatPrice(app.price)} · v{app.version || '1.0.0'}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => startEdit(app)} className={`p-2 rounded-lg flex-shrink-0 ${dark ? 'hover:bg-white/10 text-white' : 'hover:bg-gray-100 text-gray-700'}`} title="Edit">
+                      <Pencil size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-
-          <FileDropField label="App file" hint="APK, ZIP, or EXE" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setAppFile(e.target.files?.[0] || null)} files={appFile} dark={dark} />
-          <FileDropField label="Logo" hint="Square image, PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
-          <FileDropField label="Screenshots" hint="At least 3 images" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
-
-          {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
-          {success && <p className="text-emerald-500 text-[13px] font-medium">{success}</p>}
-          {step && !error && <p className="text-violet-500 text-[13px] font-medium">{step}</p>}
-
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 text-[14px]">
-            {loading ? 'Submitting…' : 'Submit for review'}
-          </button>
-        </form>
+        )}
       </div>
     </div>
   );
 }
+
 
 function ToastStack({ toasts, onDismiss }) {
   if (!toasts.length) return null;
@@ -1732,16 +1956,6 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
         </div>
       </div>
 
-      <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 rounded-2xl p-6 text-white text-center mt-auto relative overflow-hidden">
-        <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center mx-auto mb-2">
-          <Package size={24} strokeWidth={2} />
-        </div>
-        <h3 className="font-extrabold text-[17px] mb-1.5">Create. Share. Inspire.</h3>
-        <p className="text-[12.5px] text-white/85 mb-4 leading-snug">Publish your app on NexaStore and reach millions.</p>
-        <button onClick={onOpenConsole} className="w-full bg-white text-violet-700 font-bold py-2.5 rounded-xl hover:bg-gray-50 transition-colors text-[13.5px] flex items-center justify-center gap-1">
-          Become a Developer <ChevronRight size={15} strokeWidth={2.5} />
-        </button>
-      </div>
     </aside>
   );
 }
@@ -1933,6 +2147,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                   onConnectWallet={onConnectWallet}
                   onDisconnectWallet={onDisconnectWallet}
                   onOpenAdmin={onOpenAdmin}
+                  onOpenDeveloper={onOpenDeveloper}
                   onSignOut={onSignOut}
                   onOpenAuth={onOpenAuth}
                   dark={false}
@@ -2250,13 +2465,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
                 <ChevronRight size={17} className="text-slate-500" />
               </button>
             ))}
-            <button onClick={onOpenDeveloper} className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl bg-gradient-to-r from-violet-600/20 to-fuchsia-500/20 border border-violet-500/30 mt-4">
-              <span className="flex items-center gap-3 text-white font-semibold text-[14px]">
-                <Package size={19} strokeWidth={2.1} className="text-violet-400" />
-                Become a Developer
-              </span>
-              <ChevronRight size={17} className="text-violet-400" />
-            </button>
+
           </div>
         </div>
       )}
@@ -2274,6 +2483,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
             onConnectWallet={onConnectWallet}
             onDisconnectWallet={onDisconnectWallet}
             onOpenAdmin={onOpenAdmin}
+            onOpenDeveloper={onOpenDeveloper}
             onSignOut={onSignOut}
             onOpenAuth={onOpenAuth}
             dark={true}
