@@ -146,6 +146,66 @@ async function sbSignIn(email, password) {
   return r.json();
 }
 
+async function sbRefresh(refreshToken) {
+  const r = await fetch(`${AUTHAPI}/token?grant_type=refresh_token`, {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
+  });
+  if (!r.ok) return null;
+  return r.json();
+}
+
+const AUTH_STORAGE_KEY = 'nexastore_auth';
+function saveAuthSession(data) {
+  // data: { access_token, refresh_token, expires_at?, expires_in? }
+  if (!data?.access_token) return;
+  const expiresAt = data.expires_at
+    || (data.expires_in ? Math.floor(Date.now() / 1000) + Number(data.expires_in) : null);
+  const payload = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || null,
+    expires_at: expiresAt,
+  };
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem('token', data.access_token); // backward compat
+  } catch {}
+}
+function loadAuthSession() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  const token = localStorage.getItem('token');
+  return token ? { access_token: token, refresh_token: null, expires_at: null } : null;
+}
+function clearAuthSession() {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem('token');
+  } catch {}
+}
+async function restoreSession() {
+  const saved = loadAuthSession();
+  if (!saved?.access_token) return null;
+  // Try current access token
+  let user = await sbGetProfile(saved.access_token);
+  if (user) return { token: saved.access_token, user, session: saved };
+  // Refresh if possible
+  if (saved.refresh_token) {
+    const refreshed = await sbRefresh(saved.refresh_token);
+    if (refreshed?.access_token) {
+      saveAuthSession(refreshed);
+      user = await sbGetProfile(refreshed.access_token);
+      if (user) return { token: refreshed.access_token, user, session: refreshed };
+    }
+  }
+  clearAuthSession();
+  return null;
+}
+
+
 /* ============================================
    SHARED: Logo, banners, icon maps, themes
    ============================================ */
@@ -509,7 +569,8 @@ function AuthModal({ onClose, onAuth }) {
     setInfo('');
     try {
       const result = isSignUp ? await sbSignUp(email, password) : await sbSignIn(email, password);
-      const token = result.session?.access_token || result.access_token;
+      const session = result.session || result;
+      const token = session?.access_token || result.access_token;
       if (!token) {
         if (isSignUp) {
           setInfo('Account created! If email confirmation is required, check your inbox — otherwise just sign in now.');
@@ -519,7 +580,7 @@ function AuthModal({ onClose, onAuth }) {
         }
         return;
       }
-      onAuth(token);
+      onAuth(session.access_token ? session : { access_token: token, refresh_token: result.refresh_token, expires_in: result.expires_in });
       onClose();
     } catch (err) {
       setError(err.message);
@@ -2928,20 +2989,16 @@ export default function NexaStore() {
     }
     init();
 
-    const token = localStorage.getItem('token');
-    if (token) {
-      sbGetProfile(token).then(async (user) => {
-        if (user) {
-          setSession(token);
-          try {
-            const profiles = await sbSelect('profiles', `id=eq.${user.id}`, token);
-            setProfile(mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false }));
-          } catch (e) {
-            setProfile(mergeDevProfile({ id: user.id, email: user.email, is_owner: false }));
-          }
-        }
-      });
-    }
+    restoreSession().then(async (restored) => {
+      if (!restored) return;
+      setSession(restored.token);
+      try {
+        const profiles = await sbSelect('profiles', `id=eq.${restored.user.id}`, restored.token);
+        setProfile(mergeDevProfile(profiles?.[0] || { id: restored.user.id, email: restored.user.email, is_owner: false }));
+      } catch (e) {
+        setProfile(mergeDevProfile({ id: restored.user.id, email: restored.user.email, is_owner: false }));
+      }
+    });
   }, []);
 
   const filteredApps = useMemo(() => {
@@ -3026,8 +3083,12 @@ export default function NexaStore() {
     await doDownload(app);
   };
 
-  const handleAuth = (token) => {
-    localStorage.setItem('token', token);
+  const handleAuth = (sessionOrToken) => {
+    const session = typeof sessionOrToken === 'string'
+      ? { access_token: sessionOrToken }
+      : sessionOrToken;
+    const token = session.access_token;
+    saveAuthSession(session);
     setSession(token);
     sbGetProfile(token).then(async (user) => {
       if (user) {
@@ -3042,7 +3103,7 @@ export default function NexaStore() {
   };
 
   const handleSignOut = () => {
-    localStorage.removeItem('token');
+    clearAuthSession();
     setSession(null);
     setProfile(null);
   };

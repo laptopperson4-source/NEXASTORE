@@ -715,39 +715,41 @@ export default function VideoPlayerCanvas({
             <div className="absolute inset-0 bg-slate-950/95 z-20 flex flex-col p-3.5 sm:p-4 animate-in fade-in zoom-in-95 duration-200 justify-between">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-1.5">
-                  <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-black text-white">
-                    <Store className="w-3 h-3" />
-                  </div>
-                  <span className="text-xs font-bold text-white">Nexastore Checkout</span>
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-[10px] font-black text-slate-950">N</div>
+                  <span className="text-xs font-bold text-white">NexaPay</span>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 font-mono border border-blue-500/20">
-                  Order #NX-9421
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 font-semibold border border-emerald-500/20">
+                  USDT · Polygon
                 </span>
               </div>
 
               <div className="my-auto space-y-2.5">
                 <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Total Amount Due</span>
-                  <div className="text-2xl font-black text-white mt-0.5">100.00 USDT</div>
-                  <div className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400 mt-1 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                    <span>Exclusive Payment: Tether USDT ({tutorial.networkName})</span>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Send exactly</span>
+                  <div className="text-2xl font-black text-emerald-400 mt-0.5">2.00 USDT</div>
+                  <div className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-300 mt-1 bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
+                    <span>Amount locked by NexaStore app price</span>
                   </div>
                 </div>
 
+                <div className="bg-white rounded-xl p-3 flex justify-center">
+                  <div className="w-24 h-24 bg-slate-200 rounded-lg grid place-items-center text-[10px] font-mono text-slate-700">QR CODE</div>
+                </div>
+
                 <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 text-left">
-                  <span className="text-[10px] text-slate-400 block mb-1">Nexastore Merchant USDT Deposit Address:</span>
-                  <span className="font-mono text-[10px] text-emerald-400 break-all select-all bg-slate-950 p-1.5 rounded block border border-slate-800">
-                    0x9E7c28FA09bE3a89A65D13b8214EbF5734A12B71
+                  <span className="text-[10px] text-slate-400 block mb-1">Wallet address (Polygon)</span>
+                  <span className="font-mono text-[9px] text-emerald-400 break-all select-all bg-slate-950 p-1.5 rounded block border border-slate-800">
+                    0xF8720081dc56427AB7851fda9F05754304f0bfb2
                   </span>
                 </div>
 
-                <div className="p-3 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xl shadow-blue-500/30 border border-blue-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Send 100.00 USDT & Complete Order</span>
+                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300 text-center font-semibold">
+                  Send USDT on Polygon only. Other networks = lost funds.
                 </div>
-                <div className="text-[9px] text-emerald-400/90 text-center flex items-center justify-center gap-1">
-                  <ShieldCheck className="w-3 h-3" />
-                  <span>Instant automated order fulfillment upon USDT network confirmation</span>
+
+                <div className="p-3 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Waiting for payment…</span>
                 </div>
               </div>
             </div>
