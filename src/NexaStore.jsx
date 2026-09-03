@@ -839,11 +839,11 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = Math.max(0, parseFloat(app?.price) || 0);
   const lockedPrice = price.toFixed(2);
-  const [email, setEmail] = useState((profile && profile.email) || '');
-  const [stage, setStage] = useState('form'); // form | pay | done | error
+  const [stage, setStage] = useState('form'); // form | pay | done
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [order, setOrder] = useState(null); // { orderId, amount, address }
+  const [order, setOrder] = useState(null);
+  const [copied, setCopied] = useState(false);
   const pollRef = useRef(null);
 
   const WORKER_URL = 'https://nexapay-gateway.laptopperson4.workers.dev';
@@ -855,42 +855,25 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200';
 
   useEffect(() => {
-    function onMsg(e) {
-      if (e?.data?.type === 'nexapay:success' || e?.data?.type === 'nexapay:done') {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setStage('done');
-        setTimeout(() => onPaid && onPaid(app), 600);
-      }
-    }
-    window.addEventListener('message', onMsg);
-    return () => {
-      window.removeEventListener('message', onMsg);
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [app, onPaid]);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
-  const startPayment = async (e) => {
-    e?.preventDefault?.();
+  const startPayment = async () => {
     setError('');
-    const em = (email || '').trim();
-    if (!em || !em.includes('@')) {
-      setError('Enter a valid email for your receipt.');
-      return;
-    }
     setBusy(true);
     try {
+      const receiptEmail = (profile && profile.email) || `buyer-${Date.now()}@nexastore.app`;
       const r = await fetch(WORKER_URL + '/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: em, amount: Number(lockedPrice) }),
+        body: JSON.stringify({ email: receiptEmail, amount: Number(lockedPrice) }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || data.message || 'Could not create order');
       const orderId = data.orderId || data.id || data.order_id;
       const address = data.address || data.wallet || PAY_ADDRESS;
-      setOrder({ orderId, amount: lockedPrice, address, email: em });
+      setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
-      // poll status
       if (orderId) {
         pollRef.current = setInterval(async () => {
           try {
@@ -899,7 +882,6 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
             if (sd.status === 'paid' || sd.status === 'completed' || sd.paid) {
               clearInterval(pollRef.current);
               setStage('done');
-              // record purchase locally
               if (session && profile) {
                 markPurchased(app.id, profile.id);
                 sbInsert('purchases', {
@@ -916,45 +898,29 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       }
     } catch (err) {
       setError(err.message || 'Payment setup failed');
-      setStage('form');
     } finally {
       setBusy(false);
     }
   };
 
-  const copyAddr = () => {
+  const copyAddr = async () => {
     if (!order?.address) return;
-    navigator.clipboard?.writeText(order.address).catch(() => {});
+    try {
+      await navigator.clipboard.writeText(order.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
   };
 
   const linked = wallet && RECOMMENDED_WALLETS.find(w => w.id === wallet.provider || w.name === wallet.name);
 
   return (
     <div className="fixed inset-0 z-[160] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <style>{`
-        #nexapay-receipt-email {
-          background-color: #1e293b !important;
-          color: #f8fafc !important;
-          -webkit-text-fill-color: #f8fafc !important;
-          caret-color: #f8fafc !important;
-        }
-        #nexapay-receipt-email::placeholder {
-          color: #94a3b8 !important;
-          -webkit-text-fill-color: #94a3b8 !important;
-        }
-        #nexapay-receipt-email:-webkit-autofill,
-        #nexapay-receipt-email:-webkit-autofill:hover,
-        #nexapay-receipt-email:-webkit-autofill:focus,
-        #nexapay-receipt-email:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px #1e293b inset !important;
-          box-shadow: 0 0 0 1000px #1e293b inset !important;
-          -webkit-text-fill-color: #f8fafc !important;
-          caret-color: #f8fafc !important;
-          transition: background-color 99999s ease-out;
-        }
-      `}</style>
-      <div className={`w-full max-w-[420px] max-h-[92vh] overflow-auto rounded-2xl border shadow-2xl ${bg} ${dark ? 'border-white/10' : 'border-gray-200'}`}
-        onClick={(e) => e.stopPropagation()} style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div
+        className={`w-full max-w-[400px] max-h-[92vh] overflow-auto rounded-2xl border shadow-2xl ${bg} ${dark ? 'border-white/10' : 'border-gray-200'}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
+      >
         <div className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b ${dark ? 'border-white/10 bg-[#0f172a]' : 'border-gray-100 bg-white'}`}>
           <div>
             <p className={`font-bold text-[15px] ${text}`}>Pay for {app?.name || 'App'}</p>
@@ -965,9 +931,13 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           </button>
         </div>
 
-        {/* App + price */}
         <div className={`mx-4 mt-3 mb-2 rounded-xl border px-3 py-2.5 flex items-center gap-3 ${card}`}>
-          <img src={app?.icon_url || app?.logo || '/vite.svg'} alt="" className="w-11 h-11 rounded-xl object-cover bg-slate-800" onError={(e)=>{e.currentTarget.style.display='none'}} />
+          <img
+            src={app?.icon_url || app?.logo || '/vite.svg'}
+            alt=""
+            className="w-11 h-11 rounded-xl object-cover bg-slate-800"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
           <div className="min-w-0 flex-1">
             <p className={`font-bold text-[13.5px] truncate ${text}`}>{app?.name}</p>
             <p className={`text-[11.5px] ${subtext}`}>{app?.category || 'App'}</p>
@@ -978,7 +948,6 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           </div>
         </div>
 
-        {/* Wallet strip */}
         {wallet ? (
           <div className={`mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 border ${dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100'}`}>
             <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
@@ -1001,7 +970,6 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
         )}
 
         <div className="px-4 pb-2">
-          {/* NexaPay card */}
           <div className={`rounded-2xl border overflow-hidden ${dark ? 'border-white/10 bg-[#0b1220]' : 'border-gray-200 bg-white'}`}>
             <div className={`px-4 py-3 border-b flex items-center justify-between ${dark ? 'border-white/5' : 'border-gray-100'}`}>
               <div className="flex items-center gap-2">
@@ -1012,90 +980,62 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
             </div>
 
             {stage === 'form' && (
-              <form onSubmit={startPayment} className="px-4 py-4 space-y-3">
+              <div className="px-4 py-4 space-y-4">
                 <div className="flex justify-between items-baseline">
                   <div>
                     <p className={`text-xs ${subtext}`}>You pay</p>
-                    <p className={`text-2xl font-bold tabular-nums ${text}`}>{lockedPrice} <span className="text-sm font-semibold text-violet-400">USDT</span></p>
+                    <p className={`text-2xl font-bold tabular-nums ${text}`}>
+                      {lockedPrice} <span className="text-sm font-semibold text-violet-400">USDT</span>
+                    </p>
                   </div>
-                  <p className={`text-[11px] text-right ${subtext}`}>Network<br /><span className="text-purple-400 font-medium">Polygon</span></p>
-                </div>
-
-                <div>
-                  <label className={`block text-[11px] mb-1 ${subtext}`} htmlFor="nexapay-receipt-email">Email for receipt</label>
-                  <input
-                    id="nexapay-receipt-email"
-                    type="text"
-                    inputMode="email"
-                    name="nexapay-receipt-email"
-                    required
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-form-type="other"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full text-sm outline-none"
-                    style={{
-                      backgroundColor: '#1e293b',
-                      color: '#f8fafc',
-                      WebkitTextFillColor: '#f8fafc',
-                      caretColor: '#f8fafc',
-                      border: '1px solid #475569',
-                      borderRadius: '12px',
-                      padding: '10px 12px',
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      fontSize: '14px',
-                      lineHeight: 1.4,
-                      boxShadow: 'none',
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#8b5cf6';
-                      e.target.style.boxShadow = '0 0 0 3px rgba(139,92,246,0.35)';
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#475569';
-                      e.target.style.boxShadow = 'none';
-                    }}
-                  />
+                  <p className={`text-[11px] text-right ${subtext}`}>
+                    Network<br /><span className="text-purple-400 font-medium">Polygon</span>
+                  </p>
                 </div>
 
                 {error && <p className="text-xs text-red-400 text-center">{error}</p>}
 
-                <button type="submit" disabled={busy}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={startPayment}
+                  disabled={busy}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
                   {busy ? <Loader2 size={16} className="animate-spin" /> : null}
                   {busy ? 'Creating order…' : 'Continue to Payment'}
                 </button>
                 <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial</p>
-              </form>
+              </div>
             )}
 
             {stage === 'pay' && order && (
               <div className="px-4 py-4 space-y-3">
                 <p className={`text-xs text-center ${subtext}`}>Send exactly</p>
                 <p className="text-center text-2xl font-black text-emerald-400">{order.amount} USDT</p>
-                <p className="text-center text-[11px] text-violet-300">on Polygon only</p>
+                <p className="text-center text-[11px] text-violet-300 font-semibold">on Polygon only</p>
 
-                <div className={`rounded-xl border p-3 text-center ${dark ? 'bg-slate-900 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`rounded-xl border p-3 ${dark ? 'bg-slate-900 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
                   <p className={`text-[10px] mb-1 ${subtext}`}>Deposit address</p>
-                  <p className="font-mono text-[11px] text-emerald-400 break-all select-all">{order.address}</p>
-                  <button type="button" onClick={copyAddr}
-                    className="mt-2 text-[12px] font-semibold text-violet-400 hover:text-violet-300">Copy address</button>
+                  <p className="font-mono text-[11px] text-emerald-400 break-all select-all leading-relaxed">{order.address}</p>
+                  <button
+                    type="button"
+                    onClick={copyAddr}
+                    className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold bg-violet-600 text-white hover:bg-violet-500"
+                  >
+                    {copied ? 'Copied!' : 'Copy address'}
+                  </button>
                 </div>
 
-                <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+                <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center font-medium ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
                   Send USDT on <b>Polygon</b> only. Other networks = lost funds.
                 </div>
 
                 <p className={`text-[11px] text-center flex items-center justify-center gap-2 ${subtext}`}>
                   <Loader2 size={14} className="animate-spin" /> Waiting for payment…
                 </p>
-                {order.orderId && <p className={`text-[10px] text-center font-mono ${subtext}`}>Order {order.orderId}</p>}
+                {order.orderId && (
+                  <p className={`text-[10px] text-center font-mono ${subtext}`}>Order {order.orderId}</p>
+                )}
               </div>
             )}
 
@@ -1111,18 +1051,23 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
         <div className="px-4 pb-3 space-y-2 mt-2">
           {(wallet?.provider || wallet?.name) && onOpenTutorial && (
-            <button type="button"
+            <button
+              type="button"
               onClick={() => {
                 const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
                 onOpenTutorial(w?.tutorialId || null, wallet.name);
               }}
-              className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+              className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}
+            >
               <BookOpen size={13} /> How to pay with {wallet.name}
             </button>
           )}
           {onOpenTutorials && (
-            <button type="button" onClick={onOpenTutorials}
-              className={`w-full text-[12px] font-semibold py-2 rounded-xl ${dark ? 'text-slate-400 hover:text-white' : 'text-gray-500'}`}>
+            <button
+              type="button"
+              onClick={onOpenTutorials}
+              className={`w-full text-[12px] font-semibold py-2 rounded-xl ${dark ? 'text-slate-400 hover:text-white' : 'text-gray-500'}`}
+            >
               Browse all wallet tutorials
             </button>
           )}
@@ -1133,9 +1078,6 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   );
 }
 
-
-  );
-}
 
 function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
