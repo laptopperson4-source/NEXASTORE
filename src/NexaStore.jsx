@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
@@ -177,13 +177,39 @@ const WALLET_KEY = 'nexastore_crypto_wallet';
 const PURCHASES_KEY = 'nexastore_purchases';
 
 const RECOMMENDED_WALLETS = [
-  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first, excellent USDT (TRC-20 & ERC-20) support', url: 'https://trustwallet.com/', networks: 'Multi-chain' },
-  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Ethereum & USDT ERC-20', url: 'https://metamask.io/', networks: 'Ethereum, L2s' },
-  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Seamless USDT from Binance exchange balances', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi' },
-  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, USDT on multiple networks', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain' },
-  { id: 'phantom', name: 'Phantom', desc: 'Great UX; supports USDT on Solana', url: 'https://phantom.app/', networks: 'Solana + more' },
-  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — fast & low fees', url: 'https://tonkeeper.com/', networks: 'TON' },
+  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first, excellent USDT (TRC-20 & ERC-20) support', url: 'https://trustwallet.com/', networks: 'Multi-chain', tutorialId: 'trust-btc-mob' },
+  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Ethereum & USDT ERC-20', url: 'https://metamask.io/', networks: 'Ethereum, L2s', tutorialId: 'metamask-eth-ext' },
+  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Seamless USDT from Binance exchange balances', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi', tutorialId: null },
+  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, USDT on multiple networks', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain', tutorialId: 'coinbase-eth-mob' },
+  { id: 'phantom', name: 'Phantom', desc: 'Great UX; supports USDT on Solana', url: 'https://phantom.app/', networks: 'Solana + more', tutorialId: 'phantom-sol-ext' },
+  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — fast & low fees', url: 'https://tonkeeper.com/', networks: 'TON', tutorialId: null },
 ];
+
+let _tutorialsCache = null;
+async function loadTutorials() {
+  if (_tutorialsCache) return _tutorialsCache;
+  try {
+    const r = await fetch('/tutorials.json');
+    if (!r.ok) throw new Error('failed');
+    _tutorialsCache = await r.json();
+  } catch {
+    _tutorialsCache = [];
+  }
+  return _tutorialsCache;
+}
+function findTutorial(tutorials, tutorialId, walletName) {
+  if (!tutorials?.length) return null;
+  if (tutorialId) {
+    const hit = tutorials.find(t => t.id === tutorialId);
+    if (hit) return hit;
+  }
+  if (walletName) {
+    const q = walletName.toLowerCase();
+    return tutorials.find(t => (t.walletName || '').toLowerCase().includes(q) || q.includes((t.walletName || '').toLowerCase())) || null;
+  }
+  return null;
+}
+
 
 function getStoredWallet() {
   try { return JSON.parse(localStorage.getItem(WALLET_KEY) || 'null'); } catch { return null; }
@@ -564,7 +590,175 @@ function FileDropField({ label, hint, icon: Icon, accept, multiple, onChange, fi
   );
 }
 
-function WalletSetupModal({ onClose, onConnected, dark }) {
+
+function TutorialViewer({ tutorial, onClose, onBack, dark }) {
+  const [step, setStep] = useState(0);
+  const steps = tutorial?.steps || [];
+  const cur = steps[step] || null;
+  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100';
+
+  if (!tutorial) return null;
+
+  return (
+    <div className={`fixed inset-0 z-[170] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-2 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100'}`}>
+        <button type="button" onClick={onBack || onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+          <ChevronLeft size={20} className={text} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className={`font-bold text-[14px] truncate ${text}`}>{tutorial.walletName}</p>
+          <p className={`text-[11.5px] truncate ${subtext}`}>{tutorial.networkName || tutorial.subtitle || 'NexaStore USDT guide'}</p>
+        </div>
+        <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+          <X size={18} className={text} />
+        </button>
+      </div>
+
+      <div className="max-w-lg mx-auto px-4 py-5">
+        <h1 className={`font-extrabold text-[17px] leading-snug mb-1 ${text}`}>{tutorial.title}</h1>
+        {tutorial.subtitle && <p className={`text-[13px] mb-4 ${subtext}`}>{tutorial.subtitle}</p>}
+
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          {steps.map((s, i) => (
+            <button key={i} type="button" onClick={() => setStep(i)}
+              className={`flex-shrink-0 w-8 h-8 rounded-full text-[12px] font-bold ${
+                i === step
+                  ? 'bg-violet-600 text-white'
+                  : i < step
+                    ? (dark ? 'bg-emerald-500/30 text-emerald-300' : 'bg-emerald-100 text-emerald-700')
+                    : (dark ? 'bg-white/10 text-slate-400' : 'bg-gray-100 text-gray-500')
+              }`}>{i + 1}</button>
+          ))}
+        </div>
+
+        {cur && (
+          <div className={`rounded-2xl border p-4 mb-4 ${card}`}>
+            {cur.badgeText && (
+              <span className={`inline-block text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md mb-2 ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+                {cur.badgeText}
+              </span>
+            )}
+            <p className={`font-bold text-[15px] mb-2 ${text}`}>{cur.title}</p>
+            <p className={`text-[13.5px] leading-relaxed mb-3 ${dark ? 'text-slate-300' : 'text-gray-700'}`}>{cur.instruction}</p>
+            {cur.narration && (
+              <div className={`rounded-xl px-3 py-2.5 text-[12.5px] leading-relaxed ${dark ? 'bg-white/5 text-slate-400' : 'bg-white text-gray-500 border border-gray-100'}`}>
+                <span className="font-semibold text-violet-500">Narration: </span>{cur.narration}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(tutorial.safetyTips || []).length > 0 && step === steps.length - 1 && (
+          <div className={`rounded-2xl border p-4 mb-4 ${dark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-100'}`}>
+            <p className={`font-bold text-[13px] mb-2 ${dark ? 'text-amber-300' : 'text-amber-800'}`}>Safety tips</p>
+            <ul className={`space-y-1.5 text-[12.5px] ${dark ? 'text-amber-200/90' : 'text-amber-900/80'}`}>
+              {tutorial.safetyTips.map((tip, i) => (
+                <li key={i} className="flex gap-2"><span>•</span><span>{tip}</span></li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="flex gap-2.5">
+          <button type="button" disabled={step <= 0} onClick={() => setStep(s => Math.max(0, s - 1))}
+            className={`flex-1 py-3 rounded-xl font-semibold text-[13.5px] disabled:opacity-40 ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-800'}`}>
+            Back
+          </button>
+          {step < steps.length - 1 ? (
+            <button type="button" onClick={() => setStep(s => s + 1)}
+              className="flex-1 py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-violet-600 to-indigo-600">
+              Next step
+            </button>
+          ) : (
+            <button type="button" onClick={onClose}
+              className="flex-1 py-3 rounded-xl font-bold text-[13.5px] text-white bg-gradient-to-r from-emerald-500 to-teal-600">
+              Done
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TutorialHub({ onClose, onOpenTutorial, dark, initialTutorials }) {
+  const [tutorials, setTutorials] = useState(initialTutorials || []);
+  const [loading, setLoading] = useState(!initialTutorials);
+  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100';
+
+  useEffect(() => {
+    if (initialTutorials?.length) return;
+    let cancelled = false;
+    setLoading(true);
+    loadTutorials().then(list => {
+      if (!cancelled) { setTutorials(list); setLoading(false); }
+    });
+    return () => { cancelled = true; };
+  }, [initialTutorials]);
+
+  const groups = useMemo(() => {
+    const g = {};
+    for (const t of tutorials) {
+      const key = t.device || 'other';
+      if (!g[key]) g[key] = [];
+      g[key].push(t);
+    }
+    return g;
+  }, [tutorials]);
+
+  const deviceLabel = { extension: 'Browser extensions', mobile: 'Mobile wallets', hardware: 'Hardware wallets', software: 'Desktop / software', other: 'Other' };
+
+  return (
+    <div className={`fixed inset-0 z-[165] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100'}`}>
+        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+          <ArrowLeft size={20} className={text} />
+        </button>
+        <div>
+          <p className={`font-bold text-[15px] ${text}`}>USDT & wallet tutorials</p>
+          <p className={`text-[11.5px] ${subtext}`}>Step-by-step guides for NexaStore checkout</p>
+        </div>
+      </div>
+      <div className="max-w-lg mx-auto px-4 py-5 space-y-6">
+        {loading && <p className={`text-[13px] text-center py-10 ${subtext}`}>Loading tutorials…</p>}
+        {!loading && tutorials.length === 0 && (
+          <p className={`text-[13px] text-center py-10 ${subtext}`}>No tutorials available.</p>
+        )}
+        {Object.keys(groups).map(key => (
+          <div key={key}>
+            <p className={`text-[12px] font-bold uppercase tracking-wider mb-2.5 ${subtext}`}>{deviceLabel[key] || key}</p>
+            <div className="space-y-2">
+              {groups[key].map(tut => (
+                <button key={tut.id} type="button" onClick={() => onOpenTutorial(tut)}
+                  className={`w-full text-left rounded-xl border px-3.5 py-3 flex items-start gap-3 hover:opacity-90 ${card}`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-600'}`}>
+                    <BookOpen size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-bold text-[13.5px] ${text}`}>{tut.walletName}</p>
+                    <p className={`text-[12px] mt-0.5 line-clamp-2 ${subtext}`}>{tut.title}</p>
+                    <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>
+                      {(tut.steps || []).length} steps · {tut.networkName || 'USDT'}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} className={`mt-1 flex-shrink-0 ${subtext}`} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
   const [address, setAddress] = useState('');
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState('');
@@ -626,10 +820,18 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
                       <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                       <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
                     </div>
-                    <a href={w.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-                      className={`flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-1 rounded-lg ${dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'}`}>
-                      Open <ExternalLink size={12} />
-                    </a>
+                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                      <a href={w.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                        className={`inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-1 rounded-lg ${dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'}`}>
+                        Open <ExternalLink size={12} />
+                      </a>
+                      {w.tutorialId && onOpenTutorial && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onOpenTutorial(w.tutorialId, w.name); }}
+                          className={`inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-1 rounded-lg ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+                          <BookOpen size={12} /> Tutorial
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </button>
               ))}
@@ -656,7 +858,7 @@ function WalletSetupModal({ onClose, onConnected, dark }) {
   );
 }
 
-function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, dark }) {
+function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = parseFloat(app.price) || 0;
   const email = (profile && profile.email) || '';
   const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
@@ -775,15 +977,33 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           />
         </div>
 
-        <p className={"text-[11px] text-center px-4 pb-3 " + subtext}>
-          Powered by NexaPay · Send USDT on Polygon to complete payment
-        </p>
+        <div className="px-4 pb-3 space-y-2">
+          {(wallet?.provider || wallet?.name) && onOpenTutorial && (
+            <button type="button"
+              onClick={() => {
+                const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
+                onOpenTutorial(w?.tutorialId || null, wallet.name);
+              }}
+              className={"w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 " + (dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700')}>
+              <BookOpen size={13} /> How to pay with {wallet.name}
+            </button>
+          )}
+          {onOpenTutorials && (
+            <button type="button" onClick={onOpenTutorials}
+              className={"w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 " + (dark ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-800')}>
+              Browse all wallet tutorials
+            </button>
+          )}
+          <p className={"text-[11px] text-center " + subtext}>
+            Powered by NexaPay · Send USDT on Polygon to complete payment
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onSignOut, onOpenAuth, dark }) {
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const bg = dark ? 'bg-transparent' : 'bg-transparent';
   const text = dark ? 'text-white' : 'text-gray-900';
@@ -882,10 +1102,18 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
                 <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                 <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
               </div>
-              <a href={w.url} target="_blank" rel="noopener noreferrer"
-                className={`flex-shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${chip} hover:opacity-80`}>
-                Open <ExternalLink size={12} />
-              </a>
+              <div className="flex flex-col gap-1.5 flex-shrink-0">
+                <a href={w.url} target="_blank" rel="noopener noreferrer"
+                  className={`inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${chip} hover:opacity-80`}>
+                  Open <ExternalLink size={12} />
+                </a>
+                {w.tutorialId && onOpenTutorial && (
+                  <button type="button" onClick={() => onOpenTutorial(w.tutorialId, w.name)}
+                    className={`inline-flex items-center gap-1 text-[11.5px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+                    <BookOpen size={12} /> Tutorial
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -910,6 +1138,15 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
 
       {/* Actions */}
       <div className="space-y-2">
+        {onOpenTutorials && (
+          <button onClick={onOpenTutorials}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+              <BookOpen size={18} className="text-violet-500" /> Wallet & USDT tutorials
+            </span>
+            <ChevronRight size={17} className={subtext} />
+          </button>
+        )}
         <button onClick={onOpenDeveloper}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
           <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
@@ -2158,7 +2395,7 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
@@ -2346,6 +2583,8 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                   onDisconnectWallet={onDisconnectWallet}
                   onOpenAdmin={onOpenAdmin}
                   onOpenDeveloper={onOpenDeveloper}
+                  onOpenTutorials={onOpenTutorials}
+                  onOpenTutorial={onOpenTutorial}
                   onSignOut={onSignOut}
                   onOpenAuth={onOpenAuth}
                   dark={false}
@@ -2421,7 +2660,7 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -2682,6 +2921,8 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
             onDisconnectWallet={onDisconnectWallet}
             onOpenAdmin={onOpenAdmin}
             onOpenDeveloper={onOpenDeveloper}
+            onOpenTutorials={onOpenTutorials}
+            onOpenTutorial={onOpenTutorial}
             onSignOut={onSignOut}
             onOpenAuth={onOpenAuth}
             dark={true}
@@ -2738,6 +2979,21 @@ export default function NexaStore() {
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [payApp, setPayApp] = useState(null);
   const [ownedTick, setOwnedTick] = useState(0); // force re-render after purchase
+  const [showTutorialHub, setShowTutorialHub] = useState(false);
+  const [activeTutorial, setActiveTutorial] = useState(null);
+
+  const openTutorialHub = () => setShowTutorialHub(true);
+  const openTutorialById = async (tutorialId, walletName) => {
+    const list = await loadTutorials();
+    const tut = findTutorial(list, tutorialId, walletName);
+    if (tut) {
+      setActiveTutorial(tut);
+      setShowTutorialHub(false);
+    } else {
+      setShowTutorialHub(true);
+      showToast('Tutorial not found for that wallet — browse the full list.', 'info');
+    }
+  };
 
   useEffect(() => {
     async function init() {
@@ -2897,6 +3153,8 @@ export default function NexaStore() {
       setWallet(null);
       showToast('Wallet disconnected', 'info');
     },
+    onOpenTutorials: openTutorialHub,
+    onOpenTutorial: openTutorialById,
   };
   void ownedTick;
 
@@ -2943,9 +3201,10 @@ export default function NexaStore() {
             setWallet(w);
             showToast(`Connected ${w.name}`, 'success');
           }}
+          onOpenTutorial={openTutorialById}
         />
       )}
-      {payApp && !showWalletModal && (
+      {payApp && !showWalletModal && !showTutorialHub && !activeTutorial && (
         <PaymentModal
           app={payApp}
           session={session}
@@ -2954,12 +3213,29 @@ export default function NexaStore() {
           dark
           onClose={() => setPayApp(null)}
           onNeedWallet={() => setShowWalletModal(true)}
+          onOpenTutorials={openTutorialHub}
+          onOpenTutorial={openTutorialById}
           onPaid={(app) => {
             setOwnedTick(t => t + 1);
             showToast(`Purchased ${app.name} — starting download…`, 'success');
             setPayApp(null);
             setTimeout(() => doDownload(app), 400);
           }}
+        />
+      )}
+      {showTutorialHub && !activeTutorial && (
+        <TutorialHub
+          dark
+          onClose={() => setShowTutorialHub(false)}
+          onOpenTutorial={(tut) => { setActiveTutorial(tut); setShowTutorialHub(false); }}
+        />
+      )}
+      {activeTutorial && (
+        <TutorialViewer
+          dark
+          tutorial={activeTutorial}
+          onBack={() => { setActiveTutorial(null); setShowTutorialHub(true); }}
+          onClose={() => { setActiveTutorial(null); setShowTutorialHub(false); }}
         />
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
