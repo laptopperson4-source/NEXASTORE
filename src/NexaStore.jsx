@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
 import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -836,151 +836,260 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
         </div>
       </div>
     </div>
-  );
-}
-
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
-  const price = parseFloat(app.price) || 0;
-  const email = (profile && profile.email) || '';
-  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
+  const price = Math.max(0, parseFloat(app?.price) || 0);
+  const lockedPrice = price.toFixed(2);
+  const [email, setEmail] = useState((profile && profile.email) || '');
+  const [stage, setStage] = useState('form'); // form | pay | done | error
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [order, setOrder] = useState(null); // { orderId, amount, address }
+  const pollRef = useRef(null);
+
+  const WORKER_URL = 'https://nexapay-gateway.laptopperson4.workers.dev';
+  const PAY_ADDRESS = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
+
+  const bg = dark ? 'bg-[#0f172a]' : 'bg-white';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
-
-  // NexaPay: self-hosted USDT (Polygon) widget + worker
-  const widgetSrc = '/nexapay-widget.html?v=2&amount=' + encodeURIComponent(price.toFixed(2)) + (email ? ('&email=' + encodeURIComponent(email)) : '');
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200';
 
   useEffect(() => {
-    function onMessage(event) {
-      const data = event.data;
-      if (!data || typeof data !== 'object') return;
-      if (data.type === 'nexapay:success') {
-        const orderId = data.orderId;
-        // Reject if paid amount was tampered with (must match developer-set price)
-        const paid = parseFloat(data.amount);
-        if (isFinite(paid) && Math.abs(paid - price) > 0.02) {
-          console.warn('NexaPay amount mismatch — ignoring success', paid, price);
-          return;
-        }
-        markPurchased(app.id, profile && profile.id);
-        try {
-          if (session && profile) {
-            sbInsert('purchases', {
-              app_id: app.id,
-              user_id: profile.id,
-              amount_usdt: price,
-              nexapay_order_id: orderId || null,
-              wallet_address: (wallet && wallet.address) || null,
-              wallet_provider: (wallet && wallet.provider) || 'nexapay',
-              status: 'completed',
-            }, session).catch(function () {});
-          }
-        } catch (e) {}
-        onPaid && onPaid(app, orderId);
-        onClose && onClose();
+    function onMsg(e) {
+      if (e?.data?.type === 'nexapay:success' || e?.data?.type === 'nexapay:done') {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setStage('done');
+        setTimeout(() => onPaid && onPaid(app), 600);
       }
     }
-    window.addEventListener('message', onMessage);
-    return function () { window.removeEventListener('message', onMessage); };
-  }, [app, session, profile, wallet, price, onPaid, onClose]);
+    window.addEventListener('message', onMsg);
+    return () => {
+      window.removeEventListener('message', onMsg);
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [app, onPaid]);
+
+  const startPayment = async (e) => {
+    e?.preventDefault?.();
+    setError('');
+    const em = (email || '').trim();
+    if (!em || !em.includes('@')) {
+      setError('Enter a valid email for your receipt.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch(WORKER_URL + '/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: em, amount: Number(lockedPrice) }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || data.message || 'Could not create order');
+      const orderId = data.orderId || data.id || data.order_id;
+      const address = data.address || data.wallet || PAY_ADDRESS;
+      setOrder({ orderId, amount: lockedPrice, address, email: em });
+      setStage('pay');
+      // poll status
+      if (orderId) {
+        pollRef.current = setInterval(async () => {
+          try {
+            const sr = await fetch(WORKER_URL + '/api/orders/' + encodeURIComponent(orderId));
+            const sd = await sr.json().catch(() => ({}));
+            if (sd.status === 'paid' || sd.status === 'completed' || sd.paid) {
+              clearInterval(pollRef.current);
+              setStage('done');
+              // record purchase locally
+              if (session && profile) {
+                markPurchased(app.id, profile.id);
+                sbInsert('purchases', {
+                  app_id: app.id,
+                  user_id: profile.id,
+                  amount_usdt: Number(lockedPrice),
+                  order_id: orderId,
+                }, session).catch(() => {});
+              }
+              setTimeout(() => onPaid && onPaid(app), 700);
+            }
+          } catch {}
+        }, 8000);
+      }
+    } catch (err) {
+      setError(err.message || 'Payment setup failed');
+      setStage('form');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyAddr = () => {
+    if (!order?.address) return;
+    navigator.clipboard?.writeText(order.address).catch(() => {});
+  };
+
+  const linked = wallet && RECOMMENDED_WALLETS.find(w => w.id === wallet.provider || w.name === wallet.name);
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-3 sm:p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={bg + " rounded-2xl w-full max-w-[420px] shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"}>
-        <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-2 flex-shrink-0">
-          <div className="min-w-0">
-            <p className={"font-bold text-[15px] truncate " + text}>Pay for {app.name}</p>
-            <p className={"text-[12px] " + subtext}>NexaPay · USDT on Polygon</p>
+    <div className="fixed inset-0 z-[160] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className={`w-full max-w-[420px] max-h-[92vh] overflow-auto rounded-2xl border shadow-2xl ${bg} ${dark ? 'border-white/10' : 'border-gray-200'}`}
+        onClick={(e) => e.stopPropagation()} style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+        <div className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b ${dark ? 'border-white/10 bg-[#0f172a]' : 'border-gray-100 bg-white'}`}>
+          <div>
+            <p className={`font-bold text-[15px] ${text}`}>Pay for {app?.name || 'App'}</p>
+            <p className={`text-[11.5px] ${subtext}`}>NexaPay · USDT on Polygon</p>
           </div>
-          <button onClick={onClose} className={"p-1.5 rounded-lg flex-shrink-0 " + (dark ? 'hover:bg-white/10' : 'hover:bg-gray-100')}>
+          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
             <X size={18} className={text} />
           </button>
         </div>
 
-        <div className={"mx-4 mb-2 rounded-xl px-3 py-2 flex items-center gap-2.5 flex-shrink-0 " + (dark ? 'bg-white/5' : 'bg-gray-50')}>
-          {app.logo_url ? (
-            <img src={app.logo_url} alt="" className="w-9 h-9 rounded-lg object-cover" />
-          ) : (
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600" />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className={"font-semibold text-[13px] truncate " + text}>{app.name}</p>
-            <p className={"text-[11px] " + subtext}>{app.category}</p>
+        {/* App + price */}
+        <div className={`mx-4 mt-3 mb-2 rounded-xl border px-3 py-2.5 flex items-center gap-3 ${card}`}>
+          <img src={app?.icon_url || app?.logo || '/vite.svg'} alt="" className="w-11 h-11 rounded-xl object-cover bg-slate-800" onError={(e)=>{e.currentTarget.style.display='none'}} />
+          <div className="min-w-0 flex-1">
+            <p className={`font-bold text-[13.5px] truncate ${text}`}>{app?.name}</p>
+            <p className={`text-[11.5px] ${subtext}`}>{app?.category || 'App'}</p>
           </div>
           <div className="text-right">
-            <p className="font-extrabold text-[15px] text-emerald-500">{price.toFixed(2)}</p>
-            <p className={"text-[10px] font-semibold " + subtext}>USDT</p>
+            <p className="font-extrabold text-[15px] text-emerald-400">{lockedPrice}</p>
+            <p className={`text-[10px] ${subtext}`}>USDT</p>
           </div>
         </div>
 
-        {(() => {
-          const linked = wallet && RECOMMENDED_WALLETS.find(w => w.id === wallet.provider || w.name === wallet.name);
-          if (wallet && linked) {
-            return (
-              <div className={"mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 flex-shrink-0 border " + (dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100')}>
-                <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className={"text-[12px] font-semibold " + (dark ? 'text-emerald-300' : 'text-emerald-800')}>{wallet.name} · NexaStore wallet</p>
-                  <p className={"text-[11px] truncate " + subtext}>{wallet.address}</p>
-                </div>
-                <a href={linked.url} target="_blank" rel="noopener noreferrer"
-                  className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90">
-                  Open {wallet.name} <ExternalLink size={12} />
-                </a>
-              </div>
-            );
-          }
-          if (wallet) {
-            return (
-              <div className={"mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 flex-shrink-0 border " + (dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100')}>
-                <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className={"text-[12px] font-semibold " + (dark ? 'text-emerald-300' : 'text-emerald-800')}>{wallet.name} · NexaStore wallet</p>
-                  <p className={"text-[11px] truncate " + subtext}>{wallet.address}</p>
-                </div>
-              </div>
-            );
-          }
-          return (
-            <button type="button" onClick={onNeedWallet}
-              className={"mx-4 mb-2 w-auto rounded-xl border-2 border-dashed px-3 py-2.5 text-[12.5px] font-semibold flex items-center justify-center gap-2 " + (dark ? 'border-violet-400/40 text-violet-300 hover:bg-violet-500/10' : 'border-violet-300 text-violet-600 hover:bg-violet-50')}>
-              <Wallet size={15} /> Connect NexaStore wallet to open it here
-            </button>
-          );
-        })()}
+        {/* Wallet strip */}
+        {wallet ? (
+          <div className={`mx-4 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 border ${dark ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-emerald-50 border-emerald-100'}`}>
+            <Wallet size={16} className="text-emerald-500 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className={`text-[12px] font-semibold ${dark ? 'text-emerald-300' : 'text-emerald-800'}`}>{wallet.name} · NexaStore wallet</p>
+              <p className={`text-[11px] truncate ${subtext}`}>{wallet.address}</p>
+            </div>
+            {linked?.url && (
+              <a href={linked.url} target="_blank" rel="noopener noreferrer"
+                className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600">
+                Open {wallet.name} <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+        ) : (
+          <button type="button" onClick={onNeedWallet}
+            className={`mx-4 mb-2 w-[calc(100%-2rem)] rounded-xl border-2 border-dashed px-3 py-2.5 text-[12.5px] font-semibold flex items-center justify-center gap-2 ${dark ? 'border-violet-400/40 text-violet-300' : 'border-violet-300 text-violet-600'}`}>
+            <Wallet size={15} /> Connect NexaStore wallet
+          </button>
+        )}
 
-        <div className="flex-1 min-h-0 px-2 pb-2">
-          <iframe
-            title="NexaPay"
-            src={widgetSrc}
-            className="w-full border-0 rounded-xl"
-            style={{ height: '520px', maxHeight: '70vh', background: 'transparent' }}
-            allow="clipboard-write"
-          />
+        <div className="px-4 pb-2">
+          {/* NexaPay card */}
+          <div className={`rounded-2xl border overflow-hidden ${dark ? 'border-white/10 bg-[#0b1220]' : 'border-gray-200 bg-white'}`}>
+            <div className={`px-4 py-3 border-b flex items-center justify-between ${dark ? 'border-white/5' : 'border-gray-100'}`}>
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold">N</div>
+                <span className={`text-sm font-semibold ${text}`}>NexaPay</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">USDT · Polygon</span>
+            </div>
+
+            {stage === 'form' && (
+              <form onSubmit={startPayment} className="px-4 py-4 space-y-3">
+                <div className="flex justify-between items-baseline">
+                  <div>
+                    <p className={`text-xs ${subtext}`}>You pay</p>
+                    <p className={`text-2xl font-bold tabular-nums ${text}`}>{lockedPrice} <span className="text-sm font-semibold text-violet-400">USDT</span></p>
+                  </div>
+                  <p className={`text-[11px] text-right ${subtext}`}>Network<br /><span className="text-purple-400 font-medium">Polygon</span></p>
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] mb-1 ${subtext}`} htmlFor="nexapay-email">Email for receipt</label>
+                  <input
+                    id="nexapay-email"
+                    type="email"
+                    name="email"
+                    required
+                    autoComplete="email"
+                    autoFocus
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className={`w-full px-3 py-2.5 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-violet-500/40 ${
+                      dark
+                        ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500'
+                        : 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400'
+                    }`}
+                    style={{ colorScheme: dark ? 'dark' : 'light' }}
+                  />
+                </div>
+
+                {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+
+                <button type="submit" disabled={busy}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {busy ? 'Creating order…' : 'Continue to Payment'}
+                </button>
+                <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial</p>
+              </form>
+            )}
+
+            {stage === 'pay' && order && (
+              <div className="px-4 py-4 space-y-3">
+                <p className={`text-xs text-center ${subtext}`}>Send exactly</p>
+                <p className="text-center text-2xl font-black text-emerald-400">{order.amount} USDT</p>
+                <p className="text-center text-[11px] text-violet-300">on Polygon only</p>
+
+                <div className={`rounded-xl border p-3 text-center ${dark ? 'bg-slate-900 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                  <p className={`text-[10px] mb-1 ${subtext}`}>Deposit address</p>
+                  <p className="font-mono text-[11px] text-emerald-400 break-all select-all">{order.address}</p>
+                  <button type="button" onClick={copyAddr}
+                    className="mt-2 text-[12px] font-semibold text-violet-400 hover:text-violet-300">Copy address</button>
+                </div>
+
+                <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+                  Send USDT on <b>Polygon</b> only. Other networks = lost funds.
+                </div>
+
+                <p className={`text-[11px] text-center flex items-center justify-center gap-2 ${subtext}`}>
+                  <Loader2 size={14} className="animate-spin" /> Waiting for payment…
+                </p>
+                {order.orderId && <p className={`text-[10px] text-center font-mono ${subtext}`}>Order {order.orderId}</p>}
+              </div>
+            )}
+
+            {stage === 'done' && (
+              <div className="px-4 py-8 text-center space-y-2">
+                <CheckCircle2 size={40} className="mx-auto text-emerald-400" />
+                <p className={`font-bold text-[15px] ${text}`}>Payment confirmed</p>
+                <p className={`text-[12.5px] ${subtext}`}>Unlocking your app…</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="px-4 pb-3 space-y-2">
+        <div className="px-4 pb-3 space-y-2 mt-2">
           {(wallet?.provider || wallet?.name) && onOpenTutorial && (
             <button type="button"
               onClick={() => {
                 const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
                 onOpenTutorial(w?.tutorialId || null, wallet.name);
               }}
-              className={"w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 " + (dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700')}>
+              className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
               <BookOpen size={13} /> How to pay with {wallet.name}
             </button>
           )}
           {onOpenTutorials && (
             <button type="button" onClick={onOpenTutorials}
-              className={"w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 " + (dark ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-800')}>
+              className={`w-full text-[12px] font-semibold py-2 rounded-xl ${dark ? 'text-slate-400 hover:text-white' : 'text-gray-500'}`}>
               Browse all wallet tutorials
             </button>
           )}
-          <p className={"text-[11px] text-center " + subtext}>
-            Powered by NexaPay · Send USDT on Polygon to complete payment
-          </p>
+          <p className={`text-[11px] text-center ${subtext}`}>Powered by NexaPay · Send USDT on Polygon to complete payment</p>
         </div>
       </div>
     </div>
+  );
+}
+
+
   );
 }
 
