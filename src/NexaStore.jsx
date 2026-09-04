@@ -840,8 +840,9 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
 }
 
 
-/** Polygon USDT (PoS) + MetaMask deep-link for fixed amount send */
+/** Polygon USDT (PoS) — browser extension payment (EIP-1193) */
 const POLYGON_CHAIN_ID = 137;
+const POLYGON_CHAIN_ID_HEX = '0x89';
 const POLYGON_USDT = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'; // 6 decimals
 const NEXAPAY_DEPOSIT = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
 
@@ -850,83 +851,182 @@ function usdtToBaseUnits(amount) {
   return String(Math.max(0, n));
 }
 
-/** Open wallet so user can buy USDT (desktop-friendly; avoid app.link which goes to download page) */
+function isMobileBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+}
+
+/** Pick any installed browser wallet extension (MetaMask, Rabby, Coinbase, Brave, Trust, etc.) */
+function getInjectedProvider() {
+  if (typeof window === 'undefined') return null;
+  const eth = window.ethereum;
+  if (!eth) return null;
+  // Multiple wallets: prefer MetaMask, then Rabby, Coinbase, then first
+  if (Array.isArray(eth.providers) && eth.providers.length) {
+    const prefer = (p) =>
+      p.isMetaMask && !p.isBraveWallet ? 1 :
+      p.isRabby ? 2 :
+      p.isCoinbaseWallet ? 3 :
+      p.isTrust || p.isTrustWallet ? 4 :
+      p.isBraveWallet ? 5 : 9;
+    return [...eth.providers].sort((a, b) => prefer(a) - prefer(b))[0];
+  }
+  return eth;
+}
+
 function walletBuyOpenUrl(wallet) {
   const name = (wallet?.name || wallet?.provider || '').toLowerCase();
   if (name.includes('metamask') || wallet?.provider === 'metamask') {
-    // Portfolio buy page works in browser; extension users already have MetaMask
     return 'https://portfolio.metamask.io/buy';
   }
   const hit = RECOMMENDED_WALLETS.find(w => w.id === wallet?.provider || w.name === wallet?.name);
   return hit?.url || 'https://portfolio.metamask.io/buy';
 }
 
-function isMobileBrowser() {
-  if (typeof navigator === 'undefined') return false;
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+function encodeUsdtTransfer(toAddress, amountUsdt) {
+  const to = (toAddress || NEXAPAY_DEPOSIT).trim().toLowerCase().replace(/^0x/, '');
+  if (to.length !== 40) throw new Error('Invalid deposit address');
+  const units = BigInt(usdtToBaseUnits(amountUsdt));
+  const paddedTo = to.padStart(64, '0');
+  const paddedAmt = units.toString(16).padStart(64, '0');
+  // transfer(address,uint256)
+  return '0xa9059cbb' + paddedTo + paddedAmt;
+}
+
+async function ensurePolygon(eth) {
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: POLYGON_CHAIN_ID_HEX }] });
+  } catch (switchErr) {
+    if (switchErr?.code === 4902) {
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: POLYGON_CHAIN_ID_HEX,
+          chainName: 'Polygon Mainnet',
+          nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+          rpcUrls: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
+          blockExplorerUrls: ['https://polygonscan.com'],
+        }],
+      });
+    } else if (switchErr?.code === 4001) {
+      throw Object.assign(new Error('Switch to Polygon cancelled'), { code: 4001 });
+    } else {
+      throw switchErr;
+    }
+  }
+}
+
+/** Read USDT balance (6 decimals) for address on Polygon via eth_call */
+async function getUsdtBalance(eth, owner) {
+  // balanceOf(address)
+  const data = '0x70a08231' + owner.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+  const raw = await eth.request({
+    method: 'eth_call',
+    params: [{ to: POLYGON_USDT, data }, 'latest'],
+  });
+  return BigInt(raw || '0x0');
+}
+
+async function getNativeBalance(eth, owner) {
+  const raw = await eth.request({ method: 'eth_getBalance', params: [owner, 'latest'] });
+  return BigInt(raw || '0x0');
 }
 
 /**
- * Deep link: opens MetaMask send UI with USDT on Polygon, receiver + amount prefilled.
- * Format: metamask.app.link/send/{USDT}@{137}/transfer?address={receiver}&uint256={amount}
+ * Pay USDT via any injected browser extension (MetaMask, Rabby, Coinbase, …).
+ * Pre-checks balances so MetaMask does not show scary "likely to fail".
  */
+async function sendUsdtViaBrowserWallet(toAddress, amountUsdt) {
+  const eth = getInjectedProvider();
+  if (!eth) return { ok: false, reason: 'no_provider', message: 'Install a browser wallet extension (MetaMask, Rabby, Coinbase, etc.) and refresh.' };
+
+  const to = (toAddress || NEXAPAY_DEPOSIT).trim();
+  const need = BigInt(usdtToBaseUnits(amountUsdt));
+
+  try {
+    const accounts = await eth.request({ method: 'eth_requestAccounts' });
+    const from = accounts?.[0];
+    if (!from) return { ok: false, reason: 'no_account', message: 'Unlock your wallet and connect this site.' };
+
+    await ensurePolygon(eth);
+
+    // Friendly balance checks BEFORE opening the confirm UI
+    try {
+      const usdtBal = await getUsdtBalance(eth, from);
+      if (usdtBal < need) {
+        const have = Number(usdtBal) / 1e6;
+        return {
+          ok: false,
+          reason: 'insufficient_usdt',
+          message: `You have ${have.toFixed(2)} USDT on Polygon but need ${amountUsdt}. Buy USDT on Polygon first, then try again.`,
+        };
+      }
+      const pol = await getNativeBalance(eth, from);
+      // ~0.01 POL is usually enough for a simple ERC-20 transfer
+      if (pol < 1000000000000000n) { // 0.001 POL
+        return {
+          ok: false,
+          reason: 'insufficient_gas',
+          message: 'You need a little POL (Polygon gas) to send USDT. Add a small amount of POL to this wallet, then try again.',
+        };
+      }
+    } catch {
+      // If balance read fails, still allow user to try (RPC issues)
+    }
+
+    const data = encodeUsdtTransfer(to, amountUsdt);
+    const txParams = {
+      from,
+      to: POLYGON_USDT,
+      data,
+      value: '0x0',
+    };
+
+    // Estimate gas so MetaMask is less likely to flag the tx
+    try {
+      const gas = await eth.request({ method: 'eth_estimateGas', params: [txParams] });
+      if (gas) {
+        // +20% buffer
+        const g = (BigInt(gas) * 120n) / 100n;
+        txParams.gas = '0x' + g.toString(16);
+      }
+    } catch (estErr) {
+      // estimate failed → almost always balance/allowance; surface clean message
+      const msg = (estErr?.message || '').toLowerCase();
+      if (msg.includes('insufficient') || msg.includes('transfer amount exceeds')) {
+        return {
+          ok: false,
+          reason: 'insufficient_usdt',
+          message: `Not enough USDT on Polygon for ${amountUsdt} USDT. Buy more, then try again.`,
+        };
+      }
+      // still proceed without gas so user can see wallet UI
+    }
+
+    const txHash = await eth.request({
+      method: 'eth_sendTransaction',
+      params: [txParams],
+    });
+    return { ok: true, txHash, from };
+  } catch (e) {
+    if (e?.code === 4001) return { ok: false, reason: 'rejected', message: 'Transaction cancelled in wallet.' };
+    const raw = e?.message || String(e);
+    if (/user rejected|denied|cancel/i.test(raw)) return { ok: false, reason: 'rejected', message: 'Transaction cancelled in wallet.' };
+    return { ok: false, reason: 'error', message: raw.slice(0, 160) };
+  }
+}
+
+// Back-compat alias
+async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt) {
+  return sendUsdtViaBrowserWallet(toAddress, amountUsdt);
+}
+
 function metamaskUsdtSendLink(toAddress, amountUsdt) {
   const to = (toAddress || NEXAPAY_DEPOSIT).trim();
   const units = usdtToBaseUnits(amountUsdt);
   return `https://metamask.app.link/send/${POLYGON_USDT}@${POLYGON_CHAIN_ID}/transfer?address=${encodeURIComponent(to)}&uint256=${units}`;
 }
 
-async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt) {
-  const eth = typeof window !== 'undefined' ? window.ethereum : null;
-  if (!eth) return { ok: false, reason: 'no_provider' };
-  const to = (toAddress || NEXAPAY_DEPOSIT).trim();
-  const units = usdtToBaseUnits(amountUsdt);
-  // amount as hex for uint256
-  const amountHex = '0x' + BigInt(units).toString(16);
-  try {
-    const accounts = await eth.request({ method: 'eth_requestAccounts' });
-    const from = accounts?.[0];
-    if (!from) return { ok: false, reason: 'no_account' };
-    // Switch / add Polygon
-    try {
-      await eth.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x89' }], // 137
-      });
-    } catch (switchErr) {
-      if (switchErr?.code === 4902) {
-        await eth.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x89',
-            chainName: 'Polygon Mainnet',
-            nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-            rpcUrls: ['https://polygon-rpc.com'],
-            blockExplorerUrls: ['https://polygonscan.com'],
-          }],
-        });
-      } else {
-        throw switchErr;
-      }
-    }
-    // ERC-20 transfer(address,uint256) selector 0xa9059cbb
-    const paddedTo = to.slice(2).toLowerCase().padStart(64, '0');
-    const paddedAmt = amountHex.slice(2).padStart(64, '0');
-    const data = '0xa9059cbb' + paddedTo + paddedAmt;
-    const txHash = await eth.request({
-      method: 'eth_sendTransaction',
-      params: [{
-        from,
-        to: POLYGON_USDT,
-        data,
-        value: '0x0',
-      }],
-    });
-    return { ok: true, txHash };
-  } catch (e) {
-    return { ok: false, reason: e?.message || 'rejected' };
-  }
-}
 
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = Math.max(0, parseFloat(app?.price) || 0);
@@ -1006,18 +1106,12 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
       startPolling(orderId, lockedPrice);
-      // Desktop extension: prompt transfer in MetaMask popup (app.link only works on mobile)
-      const injected = await sendUsdtViaInjectedMetaMask(address, lockedPrice);
-      if (!injected.ok) {
-        if (isMobileBrowser() || injected.reason === 'no_provider') {
-          // Mobile deep-link OR no extension installed
-          window.open(metamaskUsdtSendLink(address, lockedPrice), '_blank', 'noopener,noreferrer');
-        } else if (injected.reason && injected.reason !== 'rejected') {
-          setError(injected.reason === 'no_account'
-            ? 'Connect MetaMask and try again.'
-            : String(injected.reason));
-        }
-        // user rejected → stay on pay screen with copy address
+      // Browser extension only (MetaMask / Rabby / Coinbase / …) — no external download page
+      const paid = await sendUsdtViaBrowserWallet(address, lockedPrice);
+      if (paid.ok) {
+        // keep polling for worker confirmation
+      } else if (paid.reason !== 'rejected') {
+        setError(paid.message || paid.reason || 'Could not start payment in wallet');
       }
     } catch (err) {
       setError(err.message || 'Payment setup failed');
@@ -1164,30 +1258,44 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   </button>
                 </div>
 
+                {error && (
+                  <p className="text-xs text-amber-300 text-center leading-relaxed px-1">{error}</p>
+                )}
+
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={async () => {
-                    const addr = order.address || PAY_ADDRESS;
-                    const amt = order.amount || lockedPrice;
-                    const res = await sendUsdtViaInjectedMetaMask(addr, amt);
-                    if (res.ok) return;
-                    if (res.reason === 'no_provider' || isMobileBrowser()) {
-                      window.open(metamaskUsdtSendLink(addr, amt), '_blank', 'noopener,noreferrer');
-                      return;
+                    setError('');
+                    setBusy(true);
+                    try {
+                      const addr = order.address || PAY_ADDRESS || NEXAPAY_DEPOSIT;
+                      const amt = order.amount || lockedPrice;
+                      const res = await sendUsdtViaBrowserWallet(addr, amt);
+                      if (res.ok) {
+                        setError('');
+                        return;
+                      }
+                      if (res.reason === 'rejected') {
+                        setError('You cancelled in the wallet. Tap Pay again when ready.');
+                        return;
+                      }
+                      setError(res.message || 'Could not complete payment in wallet');
+                    } finally {
+                      setBusy(false);
                     }
-                    if (res.reason === 'rejected') return;
-                    setError(res.reason === 'no_account' ? 'Unlock MetaMask and connect this site.' : String(res.reason || 'Could not open MetaMask'));
                   }}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-95"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-orange-500 text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-95 disabled:opacity-50"
                 >
-                  Pay {order.amount || lockedPrice} USDT in MetaMask
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
+                  {busy ? 'Waiting for wallet…' : `Pay ${order.amount || lockedPrice} USDT in browser wallet`}
                 </button>
-                <p className={`text-[11px] text-center ${subtext}`}>
-                  MetaMask extension will ask you to confirm sending <b>{order.amount || lockedPrice} USDT</b> on Polygon to NexaPay.
+                <p className={`text-[11px] text-center leading-relaxed ${subtext}`}>
+                  Uses your installed extension (MetaMask, Rabby, Coinbase, Brave…). Confirms <b>{order.amount || lockedPrice} USDT</b> on <b>Polygon</b> to NexaPay — no extra tabs.
                 </p>
 
                 <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center font-medium ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
-                  Send USDT on <b>Polygon</b> only. Other networks = lost funds.
+                  Need USDT + a little POL for gas on <b>Polygon</b>. Other networks = lost funds.
                 </div>
 
                 <p className={`text-[11px] text-center flex items-center justify-center gap-2 ${subtext}`}>
@@ -1196,6 +1304,14 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 {order.orderId && (
                   <p className={`text-[10px] text-center font-mono ${subtext}`}>Order {order.orderId}</p>
                 )}
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`w-full py-2.5 rounded-xl text-[13px] font-semibold border ${dark ? 'border-white/15 text-slate-300 hover:bg-white/5' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                >
+                  Cancel payment
+                </button>
               </div>
             )}
 
