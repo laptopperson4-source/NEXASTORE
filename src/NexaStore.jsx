@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy, Moon, Sun } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
@@ -231,19 +231,6 @@ const BANNERS = ['/banner-usdt.png', '/banner-discover.png', '/banner-gaming.png
    table if it exists on Supabase).
    ============================================ */
 const WALLET_KEY = 'nexastore_crypto_wallet';
-const THEME_KEY = 'nexastore_dark';
-function getStoredDark() {
-  try {
-    const v = localStorage.getItem(THEME_KEY);
-    if (v === '0') return false;
-    if (v === '1') return true;
-  } catch {}
-  // default: dark (matches mobile store look)
-  return true;
-}
-function setStoredDark(dark) {
-  try { localStorage.setItem(THEME_KEY, dark ? '1' : '0'); } catch {}
-}
 
 const PURCHASES_KEY = 'nexastore_purchases';
 
@@ -2879,7 +2866,7 @@ function EmptyLibraryState({ view, session, onOpenAuth, onOpenDeveloper, dark })
 /* ============================================
    DESKTOP — light theme (md and up)
    ============================================ */
-function DesktopSidebar({ view, setView, dark = false }) {
+function DesktopSidebar({ view, setView }) {
   const navItems = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'discover', label: 'Discover', icon: Compass },
@@ -2895,22 +2882,17 @@ function DesktopSidebar({ view, setView, dark = false }) {
     { id: 'wishlist', label: 'Wishlist', icon: Heart },
   ];
 
-  const aside = dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100';
-  const brand = dark ? 'text-white' : 'text-gray-900';
-  const inactive = dark ? 'text-slate-300 hover:bg-white/5' : 'text-gray-600 hover:bg-gray-50';
-  const libLabel = dark ? 'text-slate-500' : 'text-gray-400';
-  const borderT = dark ? 'border-white/10' : 'border-gray-100';
   return (
-    <aside className={`w-[272px] border-r h-screen sticky top-0 flex flex-col ${aside}`}>
+    <aside className="w-[272px] bg-white border-r border-gray-100 h-screen sticky top-0 flex flex-col">
       <div className="px-6 pt-6 pb-5 flex items-center gap-2.5">
         <NexaLogo size={38} />
-        <span className={`text-[19px] font-extrabold tracking-tight ${brand}`}>NexaStore</span>
+        <span className="text-[19px] font-extrabold text-gray-900 tracking-tight">NexaStore</span>
       </div>
 
       <nav className="flex-1 px-4 space-y-1 overflow-auto">
         {navItems.map(({ id, label, icon: Icon, badge }) => (
           <button key={id} onClick={() => setView(id)}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all ${view === id ? 'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold shadow-[0_4px_14px_rgba(99,102,241,0.35)]' : `${inactive} font-medium`}`}>
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all ${view === id ? 'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold shadow-[0_4px_14px_rgba(99,102,241,0.35)]' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
             <span className="flex items-center gap-3 text-[15px]">
               <Icon size={19} strokeWidth={2.2} />
               {label}
@@ -2918,11 +2900,11 @@ function DesktopSidebar({ view, setView, dark = false }) {
             {badge && <span className="bg-pink-500 text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center">{badge}</span>}
           </button>
         ))}
-        <div className={`pt-5 mt-5 border-t ${borderT}`}>
-          <p className={`text-[11px] font-bold px-4 mb-2 tracking-wider ${libLabel}`}>LIBRARY</p>
+        <div className="pt-5 mt-5 border-t border-gray-100">
+          <p className="text-[11px] font-bold text-gray-400 px-4 mb-2 tracking-wider">LIBRARY</p>
           {libraryItems.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setView(id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-[15px] ${view === id ? 'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold shadow-[0_4px_14px_rgba(99,102,241,0.35)]' : `${inactive} font-medium`}`}>
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-[15px] ${view === id ? 'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold shadow-[0_4px_14px_rgba(99,102,241,0.35)]' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
               <Icon size={19} strokeWidth={2.2} />
               {label}
             </button>
@@ -2934,18 +2916,13 @@ function DesktopSidebar({ view, setView, dark = false }) {
   );
 }
 
-function DesktopRightSidebar({ topApps, latestApps, onOpenConsole, dark = false }) {
+function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   const [activeTab, setActiveTab] = useState('Apps');
-  const aside = dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100';
-  const title = dark ? 'text-white' : 'text-gray-900';
-  const sub = dark ? 'text-slate-400' : 'text-gray-400';
-  const name = dark ? 'text-white' : 'text-gray-900';
-  const borderB = dark ? 'border-white/10' : 'border-gray-100';
   return (
-    <aside className={`hidden lg:flex flex-col w-[320px] border-l p-6 gap-7 h-screen overflow-auto sticky top-0 ${aside}`}>
+    <aside className="hidden lg:flex flex-col w-[320px] bg-white border-l border-gray-100 p-6 gap-7 h-screen overflow-auto sticky top-0">
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className={`text-[17px] font-extrabold ${title}`}>Top Charts</h3>
+          <h3 className="text-[17px] font-extrabold text-gray-900">Top Charts</h3>
           <button className="text-blue-600 text-[13px] font-semibold hover:text-blue-700">View all</button>
         </div>
         <div className="flex gap-5 mb-4 border-b border-gray-100">
@@ -2975,7 +2952,7 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole, dark = false 
 
       <div>
         <div className="flex items-center justify-between mb-3.5">
-          <h3 className={`text-[17px] font-extrabold ${title}`}>Latest Updates</h3>
+          <h3 className="text-[17px] font-extrabold text-gray-900">Latest Updates</h3>
           <button className="text-blue-600 text-[13px] font-semibold hover:text-blue-700">View all</button>
         </div>
         <div className="space-y-3.5">
@@ -2998,7 +2975,8 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole, dark = false 
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, dark = false, onToggleDark }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
+  const dark = false;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
@@ -3017,30 +2995,21 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
     return () => { cancelled = true; };
   }, [view, session, profile]);
 
-  const shell = dark ? 'bg-[#070b1a]' : 'bg-white';
-  const headerBg = dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-100';
-  const searchCls = dark
-    ? 'w-full bg-white/10 pl-5 pr-11 py-3 rounded-full text-[14px] placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 text-white'
-    : 'w-full bg-gray-100 pl-5 pr-11 py-3 rounded-full text-[14px] placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-800';
-  const iconBtn = dark ? 'p-2 text-slate-300 hover:bg-white/10 rounded-lg transition-colors' : 'p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors';
   return (
-    <div className={`hidden md:flex min-h-screen w-full ${shell}`}>
-      <DesktopSidebar view={view} setView={setView} dark={dark} />
+    <div className="hidden md:flex min-h-screen bg-white w-full">
+      <DesktopSidebar view={view} setView={setView} />
       <main className="flex-1 flex flex-col min-w-0">
-        <header className={`border-b sticky top-0 z-20 ${headerBg}`}>
+        <header className="bg-white border-b border-gray-100 sticky top-0 z-20">
           <div className="px-8 py-4 flex items-center gap-6">
             <div className="flex-1 max-w-2xl">
               <div className="relative">
                 <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search for apps, games, tools and more..."
-                  className={searchCls} />
-                <Search size={18} strokeWidth={2.3} className={`absolute right-4 top-1/2 -translate-y-1/2 ${dark ? 'text-slate-500' : 'text-gray-400'}`} />
+                  className="w-full bg-gray-100 pl-5 pr-11 py-3 rounded-full text-[14px] placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-800" />
+                <Search size={18} strokeWidth={2.3} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <button type="button" onClick={onToggleDark} className={iconBtn} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
-                {dark ? <Sun size={20} strokeWidth={2.1} /> : <Moon size={20} strokeWidth={2.1} />}
-              </button>
-              <button className={iconBtn}>
+              <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
                 <Download size={20} strokeWidth={2.1} />
               </button>
               <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
@@ -3226,7 +3195,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
             {!loading && filteredApps.length === 0 && !libraryViews.includes(view) && view !== 'profile' && <p className="text-center py-16 text-gray-400 text-sm">No apps found</p>}
           </div>
 
-          <DesktopRightSidebar topApps={filteredApps} latestApps={filteredApps} onOpenConsole={onOpenDeveloper} dark={dark} />
+          <DesktopRightSidebar topApps={filteredApps} latestApps={filteredApps} onOpenConsole={onOpenDeveloper} />
         </div>
       </main>
     </div>
@@ -3272,7 +3241,8 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, dark = true, onToggleDark }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
+  const dark = true;
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -3298,22 +3268,16 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
     return () => { cancelled = true; };
   }, [view, session, profile]);
 
-  const mobBg = dark ? '#0a0e27' : '#f8fafc';
-  const mobBrand = dark ? 'text-white' : 'text-gray-900';
-  const mobIcon = dark ? 'text-white/90' : 'text-gray-700';
   return (
-    <div className="md:hidden min-h-screen w-full" style={{ background: mobBg }}>
+    <div className="md:hidden min-h-screen w-full" style={{ background: '#0a0e27' }}>
       {/* Header */}
       <div className="px-4 pt-5 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <NexaLogo size={34} />
-          <span className={`text-[17px] font-extrabold tracking-tight ${mobBrand}`}>NexaStore</span>
+          <span className="text-[17px] font-extrabold text-white tracking-tight">NexaStore</span>
         </div>
         <div className="flex items-center gap-3.5">
-          <button type="button" onClick={onToggleDark} className={mobIcon} title={dark ? 'Light mode' : 'Dark mode'}>
-            {dark ? <Sun size={21} strokeWidth={2} /> : <Moon size={21} strokeWidth={2} />}
-          </button>
-          <button className={mobIcon}>
+          <button className="text-white/90">
             <Bell size={21} strokeWidth={2} />
           </button>
           {session && profile ? (
@@ -3562,14 +3526,6 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
    MAIN
    ============================================ */
 export default function NexaStore() {
-  const [dark, setDark] = useState(() => getStoredDark());
-  const toggleDark = () => {
-    setDark((d) => {
-      const next = !d;
-      setStoredDark(next);
-      return next;
-    });
-  };
   const [view, setView] = useState('home');
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -3762,49 +3718,47 @@ export default function NexaStore() {
     },
     onOpenTutorials: openTutorialHub,
     onOpenTutorial: openTutorialById,
-    dark,
-    onToggleDark: toggleDark,
   };
   void ownedTick;
 
   return (
-    <div style={{ fontFamily: "'Inter', sans-serif" }} className={dark ? 'dark' : ''}>
+    <div style={{ fontFamily: "'Inter', sans-serif" }}>
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={dark} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
           <div className="hidden md:block">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={dark} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
         </>
       )}
       {showAdmin && session && profile && profile.is_owner && (
         <>
           <div className="md:hidden">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={dark} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={true} showToast={showToast} />
           </div>
           <div className="hidden md:block">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={dark} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={true} showToast={showToast} />
           </div>
         </>
       )}
       {selectedApp && (
         <>
           <div className="md:hidden">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={dark} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={true} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
           <div className="hidden md:block">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={dark} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={true} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
         </>
       )}
       {showWalletModal && (
         <WalletSetupModal
-          dark={dark}
+          dark={true}
           onClose={() => setShowWalletModal(false)}
           onConnected={(w) => {
             setWallet(w);
@@ -3819,7 +3773,7 @@ export default function NexaStore() {
           session={session}
           profile={profile}
           wallet={wallet}
-          dark={dark}
+          dark={true}
           onClose={() => setPayApp(null)}
           onNeedWallet={() => setShowWalletModal(true)}
           onOpenTutorials={openTutorialHub}
@@ -3834,14 +3788,14 @@ export default function NexaStore() {
       )}
       {showTutorialHub && !activeTutorial && (
         <TutorialHub
-          dark={dark}
+          dark={true}
           onClose={() => setShowTutorialHub(false)}
           onOpenTutorial={(tut) => { setActiveTutorial(tut); setShowTutorialHub(false); }}
         />
       )}
       {activeTutorial && (
         <TutorialViewer
-          dark={dark}
+          dark={true}
           tutorial={activeTutorial}
           onBack={() => { setActiveTutorial(null); setShowTutorialHub(true); }}
           onClose={() => { setActiveTutorial(null); setShowTutorialHub(false); }}
