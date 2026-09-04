@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
@@ -1632,7 +1632,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
                 Create a crypto account now if you ever plan to buy anything from NexaStore
               </p>
               <p className={`text-[12.5px] mt-1.5 ${dark ? 'text-emerald-300/80' : 'text-emerald-800/80'}`}>
-                NexaStore accepts <span className="font-bold">USDT only</span>. Connect a wallet once — then you can unlock premium apps anytime.
+                NexaStore accepts <span className="font-bold">USDT only</span>. Connect a wallet once — then you can unlock paid apps anytime.
               </p>
             </div>
           </div>
@@ -2911,19 +2911,6 @@ function DesktopSidebar({ view, setView }) {
         </div>
       </nav>
 
-      <div className="p-4">
-        <div className="bg-gradient-to-br from-violet-600 via-fuchsia-500 to-orange-400 rounded-2xl p-5 text-white relative overflow-hidden">
-          <div className="flex items-center gap-2 mb-2.5">
-            <Crown size={17} className="fill-yellow-300 text-yellow-300" strokeWidth={2} />
-            <span className="font-bold text-[13px]">NexaStore</span>
-            <span className="bg-white/25 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide">PREMIUM</span>
-          </div>
-          <p className="text-[12.5px] text-white/90 mb-4 leading-snug">Go premium and unlock exclusive perks.</p>
-          <button className="w-full bg-white text-violet-700 font-bold py-2.5 rounded-xl hover:bg-gray-50 transition-colors text-[13.5px] flex items-center justify-center gap-1">
-            Upgrade Now <ChevronRight size={15} strokeWidth={2.5} />
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -3361,25 +3348,6 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
             </div>
           </div>
 
-          <div className="px-4 mb-8">
-            <div className="bg-gradient-to-br from-violet-600 via-fuchsia-500 to-orange-400 rounded-2xl p-5 relative overflow-hidden">
-              <div className="relative z-10 max-w-[70%]">
-                <div className="flex items-center gap-2 mb-2.5">
-                  <Crown size={16} className="fill-yellow-300 text-yellow-300" strokeWidth={2} />
-                  <span className="font-bold text-[13px] text-white">NexaStore</span>
-                  <span className="bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-md text-[9.5px] font-extrabold tracking-wide">PREMIUM</span>
-                </div>
-                <p className="text-[12.5px] text-white/90 mb-4 leading-snug">Go premium and unlock exclusive perks.</p>
-                <button className="bg-white text-violet-700 font-bold py-2 px-4 rounded-xl text-[12.5px] flex items-center gap-1">
-                  Upgrade Now <ChevronRight size={14} strokeWidth={2.5} />
-                </button>
-              </div>
-              <div className="absolute -right-2 top-1/2 -translate-y-1/2 flex gap-1.5 opacity-90">
-                <div className="w-11 h-11 rounded-xl bg-white/25 rotate-12" />
-                <div className="w-9 h-9 rounded-xl bg-white/20 -rotate-6 mt-4" />
-              </div>
-            </div>
-          </div>
 
           <div className="px-4 mb-8">
             <div className="flex items-center justify-between mb-3">
@@ -3684,7 +3652,7 @@ export default function NexaStore() {
     if (price > 0 && !isOwned(app)) {
       if (!session) {
         setShowAuthModal(true);
-        showToast('Sign in to purchase premium apps.', 'info');
+        showToast('Sign in to purchase apps.', 'info');
         return;
       }
       // Open NexaPay checkout (USDT on Polygon). Wallet setup is optional and available in Profile.
