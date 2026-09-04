@@ -210,19 +210,15 @@ async function restoreSession() {
    SHARED: Logo, banners, icon maps, themes
    ============================================ */
 function NexaLogo({ size = 40 }) {
-  const id = React.useId();
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id={`lg-${id}`} x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#F43F8E" />
-          <stop offset="45%" stopColor="#A855F7" />
-          <stop offset="100%" stopColor="#4F46E5" />
-        </linearGradient>
-      </defs>
-      <rect width="40" height="40" rx="11" fill={`url(#lg-${id})`} />
-      <path d="M12 28.5V11.5L14.6 11.5L27 28.2V11.8" stroke="white" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-    </svg>
+    <img
+      src="/nexastore-icon.png"
+      alt="NexaStore"
+      width={size}
+      height={size}
+      className="rounded-[22%] object-cover flex-shrink-0"
+      style={{ width: size, height: size }}
+    />
   );
 }
 
