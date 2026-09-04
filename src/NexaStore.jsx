@@ -850,13 +850,20 @@ function usdtToBaseUnits(amount) {
   return String(Math.max(0, n));
 }
 
-/** Open wallet app so user can buy USDT first (before paying) */
+/** Open wallet so user can buy USDT (desktop-friendly; avoid app.link which goes to download page) */
 function walletBuyOpenUrl(wallet) {
-  if (wallet?.provider === 'metamask' || (wallet?.name || '').toLowerCase().includes('metamask')) {
-    return 'https://metamask.app.link/';
+  const name = (wallet?.name || wallet?.provider || '').toLowerCase();
+  if (name.includes('metamask') || wallet?.provider === 'metamask') {
+    // Portfolio buy page works in browser; extension users already have MetaMask
+    return 'https://portfolio.metamask.io/buy';
   }
   const hit = RECOMMENDED_WALLETS.find(w => w.id === wallet?.provider || w.name === wallet?.name);
-  return hit?.url || 'https://metamask.app.link/';
+  return hit?.url || 'https://portfolio.metamask.io/buy';
+}
+
+function isMobileBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
 }
 
 /**
@@ -999,9 +1006,19 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
       startPolling(orderId, lockedPrice);
-      // Open MetaMask: USDT@137 transfer with receiver + amount filled
-      const link = metamaskUsdtSendLink(address, lockedPrice);
-      window.open(link, '_blank', 'noopener,noreferrer');
+      // Desktop extension: prompt transfer in MetaMask popup (app.link only works on mobile)
+      const injected = await sendUsdtViaInjectedMetaMask(address, lockedPrice);
+      if (!injected.ok) {
+        if (isMobileBrowser() || injected.reason === 'no_provider') {
+          // Mobile deep-link OR no extension installed
+          window.open(metamaskUsdtSendLink(address, lockedPrice), '_blank', 'noopener,noreferrer');
+        } else if (injected.reason && injected.reason !== 'rejected') {
+          setError(injected.reason === 'no_account'
+            ? 'Connect MetaMask and try again.'
+            : String(injected.reason));
+        }
+        // user rejected → stay on pay screen with copy address
+      }
     } catch (err) {
       setError(err.message || 'Payment setup failed');
     } finally {
@@ -1147,26 +1164,27 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   </button>
                 </div>
 
-                <a
-                  href={metamaskUsdtSendLink(order.address || PAY_ADDRESS, order.amount || lockedPrice)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-95"
-                >
-                  Open MetaMask to send {order.amount || lockedPrice} USDT <ExternalLink size={14} />
-                </a>
                 <button
                   type="button"
                   onClick={async () => {
-                    const res = await sendUsdtViaInjectedMetaMask(order.address || PAY_ADDRESS, order.amount || lockedPrice);
-                    if (!res.ok && res.reason === 'no_provider') {
-                      window.open(metamaskUsdtSendLink(order.address || PAY_ADDRESS, order.amount || lockedPrice), '_blank');
+                    const addr = order.address || PAY_ADDRESS;
+                    const amt = order.amount || lockedPrice;
+                    const res = await sendUsdtViaInjectedMetaMask(addr, amt);
+                    if (res.ok) return;
+                    if (res.reason === 'no_provider' || isMobileBrowser()) {
+                      window.open(metamaskUsdtSendLink(addr, amt), '_blank', 'noopener,noreferrer');
+                      return;
                     }
+                    if (res.reason === 'rejected') return;
+                    setError(res.reason === 'no_account' ? 'Unlock MetaMask and connect this site.' : String(res.reason || 'Could not open MetaMask'));
                   }}
-                  className={`w-full py-2.5 rounded-xl text-[12.5px] font-semibold border ${dark ? 'border-white/15 text-white hover:bg-white/5' : 'border-gray-200 text-gray-800 hover:bg-gray-50'}`}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-95"
                 >
-                  Or pay with MetaMask in this browser
+                  Pay {order.amount || lockedPrice} USDT in MetaMask
                 </button>
+                <p className={`text-[11px] text-center ${subtext}`}>
+                  MetaMask extension will ask you to confirm sending <b>{order.amount || lockedPrice} USDT</b> on Polygon to NexaPay.
+                </p>
 
                 <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center font-medium ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
                   Send USDT on <b>Polygon</b> only. Other networks = lost funds.
