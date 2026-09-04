@@ -948,9 +948,17 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const sr = await fetch(WORKER_URL + '/api/orders/' + encodeURIComponent(orderId));
-        const sd = await sr.json().catch(() => ({}));
-        if (sd.status === 'paid' || sd.status === 'completed' || sd.paid) {
+        // Prefer on-chain check, fall back to order status
+        const checkUrl = WORKER_URL + '/api/check-payment?id=' + encodeURIComponent(orderId)
+          + '&amount=' + encodeURIComponent(amount || lockedPrice);
+        let sd = await fetch(checkUrl).then(r => r.json()).catch(() => ({}));
+        if (!sd.paid && !sd.status) {
+          const st = await fetch(WORKER_URL + '/api/order-status?id=' + encodeURIComponent(orderId))
+            .then(r => r.json()).catch(() => ({}));
+          sd = st.order || st;
+        }
+        const status = (sd.status || sd.order?.status || '').toString().toLowerCase();
+        if (sd.paid || status === 'paid' || status === 'completed' || status === 'success') {
           clearInterval(pollRef.current);
           setStage('done');
           if (session && profile) {
@@ -974,19 +982,24 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
     setBusy(true);
     try {
       const receiptEmail = (profile && profile.email) || `buyer-${Date.now()}@nexastore.app`;
-      const r = await fetch(WORKER_URL + '/api/orders', {
+      const r = await fetch(WORKER_URL + '/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: receiptEmail, amount: Number(lockedPrice) }),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || data.message || 'Could not create order');
-      const orderId = data.orderId || data.id || data.order_id;
-      const address = (data.address || data.wallet || PAY_ADDRESS || NEXAPAY_DEPOSIT).trim();
+      if (!r.ok || data.error) {
+        throw new Error(data.error || data.message || 'Could not create order');
+      }
+      // Worker returns { success, order: { id, ... } }
+      const created = data.order || data;
+      const orderId = created.id || data.orderId || data.id;
+      if (!orderId) throw new Error('Order created but no id returned');
+      const address = (PAY_ADDRESS || NEXAPAY_DEPOSIT).trim();
       setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
       startPolling(orderId, lockedPrice);
-      // Open MetaMask with USDT@Polygon transfer prefilled (receiver + amount)
+      // Open MetaMask: USDT@137 transfer with receiver + amount filled
       const link = metamaskUsdtSendLink(address, lockedPrice);
       window.open(link, '_blank', 'noopener,noreferrer');
     } catch (err) {
@@ -1048,15 +1061,6 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
               <p className={`text-[12px] font-semibold ${dark ? 'text-emerald-300' : 'text-emerald-800'}`}>{wallet.name} · NexaStore wallet</p>
               <p className={`text-[11px] truncate ${subtext}`}>{wallet.address}</p>
             </div>
-            <a
-              href={walletBuyOpenUrl(wallet)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600"
-              title="Open wallet to buy USDT"
-            >
-              Open {wallet?.name || 'MetaMask'} <ExternalLink size={12} />
-            </a>
           </div>
         ) : (
           <button type="button" onClick={onNeedWallet}
