@@ -850,12 +850,23 @@ function usdtToBaseUnits(amount) {
   return String(Math.max(0, n));
 }
 
-/** Deep link that opens MetaMask send UI with fixed USDT amount + receiver on Polygon */
+/** Open wallet app so user can buy USDT first (before paying) */
+function walletBuyOpenUrl(wallet) {
+  if (wallet?.provider === 'metamask' || (wallet?.name || '').toLowerCase().includes('metamask')) {
+    return 'https://metamask.app.link/';
+  }
+  const hit = RECOMMENDED_WALLETS.find(w => w.id === wallet?.provider || w.name === wallet?.name);
+  return hit?.url || 'https://metamask.app.link/';
+}
+
+/**
+ * Deep link: opens MetaMask send UI with USDT on Polygon, receiver + amount prefilled.
+ * Format: metamask.app.link/send/{USDT}@{137}/transfer?address={receiver}&uint256={amount}
+ */
 function metamaskUsdtSendLink(toAddress, amountUsdt) {
   const to = (toAddress || NEXAPAY_DEPOSIT).trim();
   const units = usdtToBaseUnits(amountUsdt);
-  // MetaMask mobile/desktop universal link for ERC-20 transfer
-  return `https://metamask.app.link/send/${POLYGON_USDT}@${POLYGON_CHAIN_ID}/transfer?address=${to}&uint256=${units}`;
+  return `https://metamask.app.link/send/${POLYGON_USDT}@${POLYGON_CHAIN_ID}/transfer?address=${encodeURIComponent(to)}&uint256=${units}`;
 }
 
 async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt) {
@@ -932,6 +943,32 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
+  const startPolling = (orderId, amount) => {
+    if (!orderId) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const sr = await fetch(WORKER_URL + '/api/orders/' + encodeURIComponent(orderId));
+        const sd = await sr.json().catch(() => ({}));
+        if (sd.status === 'paid' || sd.status === 'completed' || sd.paid) {
+          clearInterval(pollRef.current);
+          setStage('done');
+          if (session && profile) {
+            markPurchased(app.id, profile.id);
+            sbInsert('purchases', {
+              app_id: app.id,
+              user_id: profile.id,
+              amount_usdt: Number(amount || lockedPrice),
+              order_id: orderId,
+            }, session).catch(() => {});
+          }
+          setTimeout(() => onPaid && onPaid(app), 700);
+        }
+      } catch {}
+    }, 8000);
+  };
+
+  /** Create order then open MetaMask send deep-link with receiver + amount filled */
   const startPayment = async () => {
     setError('');
     setBusy(true);
@@ -945,31 +982,13 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || data.message || 'Could not create order');
       const orderId = data.orderId || data.id || data.order_id;
-      const address = data.address || data.wallet || PAY_ADDRESS;
+      const address = (data.address || data.wallet || PAY_ADDRESS || NEXAPAY_DEPOSIT).trim();
       setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
-      if (orderId) {
-        pollRef.current = setInterval(async () => {
-          try {
-            const sr = await fetch(WORKER_URL + '/api/orders/' + encodeURIComponent(orderId));
-            const sd = await sr.json().catch(() => ({}));
-            if (sd.status === 'paid' || sd.status === 'completed' || sd.paid) {
-              clearInterval(pollRef.current);
-              setStage('done');
-              if (session && profile) {
-                markPurchased(app.id, profile.id);
-                sbInsert('purchases', {
-                  app_id: app.id,
-                  user_id: profile.id,
-                  amount_usdt: Number(lockedPrice),
-                  order_id: orderId,
-                }, session).catch(() => {});
-              }
-              setTimeout(() => onPaid && onPaid(app), 700);
-            }
-          } catch {}
-        }, 8000);
-      }
+      startPolling(orderId, lockedPrice);
+      // Open MetaMask with USDT@Polygon transfer prefilled (receiver + amount)
+      const link = metamaskUsdtSendLink(address, lockedPrice);
+      window.open(link, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setError(err.message || 'Payment setup failed');
     } finally {
@@ -1030,11 +1049,11 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
               <p className={`text-[11px] truncate ${subtext}`}>{wallet.address}</p>
             </div>
             <a
-              href={metamaskUsdtSendLink((order && order.address) || PAY_ADDRESS, lockedPrice)}
+              href={walletBuyOpenUrl(wallet)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600"
-              title={`Send ${lockedPrice} USDT on Polygon`}
+              title="Open wallet to buy USDT"
             >
               Open {wallet?.name || 'MetaMask'} <ExternalLink size={12} />
             </a>
@@ -1070,18 +1089,39 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   </p>
                 </div>
 
-                {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+                <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                  <p className={`text-[12px] font-bold ${text}`}>1. Buy USDT in your wallet</p>
+                  <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
+                    Open your wallet and buy at least <b className={text}>{lockedPrice} USDT</b> on the <b className={text}>Polygon</b> network. Come back here when you have enough.
+                  </p>
+                  <a
+                    href={walletBuyOpenUrl(wallet)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 rounded-xl text-[12.5px] font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-600 flex items-center justify-center gap-2"
+                  >
+                    Open {wallet?.name || 'wallet'} to buy USDT <ExternalLink size={13} />
+                  </a>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={startPayment}
-                  disabled={busy}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {busy ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {busy ? 'Creating order…' : 'Continue to Payment'}
-                </button>
-                <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial</p>
+                <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                  <p className={`text-[12px] font-bold ${text}`}>2. Send payment</p>
+                  <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
+                    Continues to MetaMask with the <b className={text}>receiver</b> and <b className={text}>{lockedPrice} USDT</b> already filled on Polygon.
+                  </p>
+                  {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+                  <button
+                    type="button"
+                    onClick={startPayment}
+                    disabled={busy}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+                    {busy ? 'Opening MetaMask…' : 'Continue to Payment'}
+                  </button>
+                </div>
+
+                <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial · Polygon USDT only</p>
               </div>
             )}
 
