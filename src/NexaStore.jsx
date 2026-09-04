@@ -839,6 +839,77 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
   );
 }
 
+
+/** Polygon USDT (PoS) + MetaMask deep-link for fixed amount send */
+const POLYGON_CHAIN_ID = 137;
+const POLYGON_USDT = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'; // 6 decimals
+const NEXAPAY_DEPOSIT = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
+
+function usdtToBaseUnits(amount) {
+  const n = Math.round(parseFloat(amount) * 1e6);
+  return String(Math.max(0, n));
+}
+
+/** Deep link that opens MetaMask send UI with fixed USDT amount + receiver on Polygon */
+function metamaskUsdtSendLink(toAddress, amountUsdt) {
+  const to = (toAddress || NEXAPAY_DEPOSIT).trim();
+  const units = usdtToBaseUnits(amountUsdt);
+  // MetaMask mobile/desktop universal link for ERC-20 transfer
+  return `https://metamask.app.link/send/${POLYGON_USDT}@${POLYGON_CHAIN_ID}/transfer?address=${to}&uint256=${units}`;
+}
+
+async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt) {
+  const eth = typeof window !== 'undefined' ? window.ethereum : null;
+  if (!eth) return { ok: false, reason: 'no_provider' };
+  const to = (toAddress || NEXAPAY_DEPOSIT).trim();
+  const units = usdtToBaseUnits(amountUsdt);
+  // amount as hex for uint256
+  const amountHex = '0x' + BigInt(units).toString(16);
+  try {
+    const accounts = await eth.request({ method: 'eth_requestAccounts' });
+    const from = accounts?.[0];
+    if (!from) return { ok: false, reason: 'no_account' };
+    // Switch / add Polygon
+    try {
+      await eth.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x89' }], // 137
+      });
+    } catch (switchErr) {
+      if (switchErr?.code === 4902) {
+        await eth.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x89',
+            chainName: 'Polygon Mainnet',
+            nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+            rpcUrls: ['https://polygon-rpc.com'],
+            blockExplorerUrls: ['https://polygonscan.com'],
+          }],
+        });
+      } else {
+        throw switchErr;
+      }
+    }
+    // ERC-20 transfer(address,uint256) selector 0xa9059cbb
+    const paddedTo = to.slice(2).toLowerCase().padStart(64, '0');
+    const paddedAmt = amountHex.slice(2).padStart(64, '0');
+    const data = '0xa9059cbb' + paddedTo + paddedAmt;
+    const txHash = await eth.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from,
+        to: POLYGON_USDT,
+        data,
+        value: '0x0',
+      }],
+    });
+    return { ok: true, txHash };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'rejected' };
+  }
+}
+
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = Math.max(0, parseFloat(app?.price) || 0);
   const lockedPrice = price.toFixed(2);
@@ -958,12 +1029,15 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
               <p className={`text-[12px] font-semibold ${dark ? 'text-emerald-300' : 'text-emerald-800'}`}>{wallet.name} · NexaStore wallet</p>
               <p className={`text-[11px] truncate ${subtext}`}>{wallet.address}</p>
             </div>
-            {linked?.url && (
-              <a href={linked.url} target="_blank" rel="noopener noreferrer"
-                className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600">
-                Open {wallet.name} <ExternalLink size={12} />
-              </a>
-            )}
+            <a
+              href={metamaskUsdtSendLink((order && order.address) || PAY_ADDRESS, lockedPrice)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-emerald-500 to-teal-600"
+              title={`Send ${lockedPrice} USDT on Polygon`}
+            >
+              Open {wallet?.name || 'MetaMask'} <ExternalLink size={12} />
+            </a>
           </div>
         ) : (
           <button type="button" onClick={onNeedWallet}
@@ -1018,16 +1092,37 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 <p className="text-center text-[11px] text-violet-300 font-semibold">on Polygon only</p>
 
                 <div className={`rounded-xl border p-3 ${dark ? 'bg-slate-900 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-[10px] mb-1 ${subtext}`}>Deposit address</p>
+                  <p className={`text-[10px] mb-1 ${subtext}`}>Deposit address (Polygon)</p>
                   <p className="font-mono text-[11px] text-emerald-400 break-all select-all leading-relaxed">{order.address}</p>
                   <button
                     type="button"
                     onClick={copyAddr}
-                    className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold bg-violet-600 text-white hover:bg-violet-500"
+                    className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold bg-slate-700 text-white hover:bg-slate-600"
                   >
                     {copied ? 'Copied!' : 'Copy address'}
                   </button>
                 </div>
+
+                <a
+                  href={metamaskUsdtSendLink(order.address || PAY_ADDRESS, order.amount || lockedPrice)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-95"
+                >
+                  Open MetaMask to send {order.amount || lockedPrice} USDT <ExternalLink size={14} />
+                </a>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await sendUsdtViaInjectedMetaMask(order.address || PAY_ADDRESS, order.amount || lockedPrice);
+                    if (!res.ok && res.reason === 'no_provider') {
+                      window.open(metamaskUsdtSendLink(order.address || PAY_ADDRESS, order.amount || lockedPrice), '_blank');
+                    }
+                  }}
+                  className={`w-full py-2.5 rounded-xl text-[12.5px] font-semibold border ${dark ? 'border-white/15 text-white hover:bg-white/5' : 'border-gray-200 text-gray-800 hover:bg-gray-50'}`}
+                >
+                  Or pay with MetaMask in this browser
+                </button>
 
                 <div className={`rounded-lg px-2.5 py-2 text-[11px] text-center font-medium ${dark ? 'bg-amber-500/10 text-amber-200 border border-amber-500/20' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
                   Send USDT on <b>Polygon</b> only. Other networks = lost funds.
