@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Crown, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
@@ -238,13 +238,54 @@ const WALLET_KEY = 'nexastore_crypto_wallet';
 const PURCHASES_KEY = 'nexastore_purchases';
 
 const RECOMMENDED_WALLETS = [
-  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first, excellent USDT (TRC-20 & ERC-20) support', url: 'https://trustwallet.com/', networks: 'Multi-chain', tutorialId: 'trust-btc-mob' },
-  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Ethereum & USDT ERC-20', url: 'https://metamask.io/', networks: 'Ethereum, L2s', tutorialId: 'metamask-eth-ext' },
-  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Seamless USDT from Binance exchange balances', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi', tutorialId: null },
-  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, USDT on multiple networks', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain', tutorialId: 'coinbase-eth-mob' },
-  { id: 'phantom', name: 'Phantom', desc: 'Great UX; supports USDT on Solana', url: 'https://phantom.app/', networks: 'Solana + more', tutorialId: 'phantom-sol-ext' },
-  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — fast & low fees', url: 'https://tonkeeper.com/', networks: 'TON', tutorialId: null },
+  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Polygon USDT on NexaStore', url: 'https://metamask.io/', networks: 'Polygon, Ethereum, L2s', tutorialId: 'metamask-eth-ext', recommended: true },
+  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first multi-chain wallet', url: 'https://trustwallet.com/', networks: 'Multi-chain', tutorialId: 'trust-btc-mob', recommended: false },
+  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, multi-chain USDT', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain', tutorialId: 'coinbase-eth-mob', recommended: false },
+  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Web3 wallet linked to Binance', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi', tutorialId: null, recommended: false },
+  { id: 'phantom', name: 'Phantom', desc: 'Great UX; mainly Solana (use MetaMask for Polygon)', url: 'https://phantom.app/', networks: 'Solana + more', tutorialId: 'phantom-sol-ext', recommended: false },
+  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — not used for NexaStore payments', url: 'https://tonkeeper.com/', networks: 'TON', tutorialId: null, recommended: false },
 ];
+
+/** Wallet-specific warnings for Polygon USDT checkout */
+function walletCheckoutWarnings(wallet) {
+  const id = (wallet?.provider || wallet?.id || '').toLowerCase();
+  const name = (wallet?.name || '').toLowerCase();
+  if (id.includes('metamask') || name.includes('metamask')) {
+    return [
+      'In MetaMask, open the network menu and select Polygon Mainnet (chain 137).',
+      'Buy or bridge USDT on Polygon — USDT on Ethereum/BSC will not work for this payment.',
+      'Keep a little POL in the same account for gas fees.',
+      'When you pay, confirm the popup in this browser — do not switch networks mid-payment.',
+    ];
+  }
+  if (id.includes('trust') || name.includes('trust')) {
+    return [
+      'In Trust Wallet, set the network to Polygon before buying or sending USDT.',
+      'Only send Polygon USDT. TRC-20 / ERC-20 USDT sent to our address will be lost.',
+      'After buying USDT, return here and use Pay in browser wallet (or copy the deposit address).',
+    ];
+  }
+  if (id.includes('coinbase') || name.includes('coinbase')) {
+    return [
+      'Switch Coinbase Wallet network to Polygon Mainnet.',
+      'Buy USDT on Polygon (not Base/Ethereum) for this store.',
+      'Return here and confirm the in-browser payment request.',
+    ];
+  }
+  if (id.includes('phantom') || name.includes('phantom')) {
+    return [
+      'Phantom is mainly Solana. For NexaStore you need a Polygon-capable wallet (MetaMask recommended).',
+      'If Phantom shows Polygon, still double-check you are sending Polygon USDT only.',
+    ];
+  }
+  return [
+    'Set your wallet network to Polygon Mainnet before buying or sending.',
+    'Only Polygon USDT is accepted. Other networks = lost funds.',
+    'Buy at least the listed USDT amount, plus a little native gas token (POL).',
+    'Come back to NexaStore and tap Continue to Payment / Pay in browser wallet.',
+  ];
+}
+
 
 let _tutorialsCache = null;
 async function loadTutorials() {
@@ -785,7 +826,7 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
           </div>
 
           <div>
-            <p className={`text-[12.5px] font-bold uppercase tracking-wide mb-2.5 ${subtext}`}>Recommended wallets</p>
+            <p className={`text-[12.5px] font-bold uppercase tracking-wide mb-2.5 ${subtext}`}>Wallets · MetaMask recommended for Polygon</p>
             <div className="space-y-2">
               {RECOMMENDED_WALLETS.map(w => (
                 <button key={w.id} type="button" onClick={() => setSelected(w)}
@@ -1028,6 +1069,131 @@ function metamaskUsdtSendLink(toAddress, amountUsdt) {
 }
 
 
+
+function aiSupportReply(userText, ctx = {}) {
+  const q = (userText || '').toLowerCase();
+  const wallet = ctx.walletName || 'your wallet';
+  if (/polygon|network|wrong chain|bsc|ethereum|trc/.test(q)) {
+    return `NexaStore only accepts USDT on Polygon (chain ID 137). In ${wallet}: open the network switcher → Polygon Mainnet. USDT on Ethereum, BSC, or TRC-20 will not complete your order and can be lost if sent to our address.`;
+  }
+  if (/gas|pol|matic|fee|likely to fail|failed/.test(q)) {
+    return `That usually means missing gas or USDT. You need (1) enough Polygon USDT for the app price and (2) a little POL for gas. Buy USDT on Polygon, keep a small POL balance, then tap Pay in browser wallet again.`;
+  }
+  if (/buy usdt|how to buy|get usdt|purchase usdt/.test(q)) {
+    return `Step-by-step: 1) Open ${wallet}. 2) Switch network to Polygon. 3) Buy or bridge USDT on Polygon (not other chains). 4) Return to NexaStore. 5) Tap Continue to Payment and confirm in the extension. Use the tutorial button for a walkthrough.`;
+  }
+  if (/metamask|extension|popup|not open|download page/.test(q)) {
+    return `On desktop we use your browser extension (no download page). Install MetaMask (recommended), unlock it, stay on this NexaStore tab, then tap Pay in browser wallet so the confirm popup appears here.`;
+  }
+  if (/order|create order|payment|pending|waiting|confirm/.test(q)) {
+    return `After you confirm the USDT transfer in your wallet, we detect it on Polygon and unlock the app automatically. Keep the payment window open for a minute. If it stays pending, copy the deposit address and send exactly the listed amount of Polygon USDT, then wait.`;
+  }
+  if (/refund|wrong|sent|lost|help|support|human/.test(q)) {
+    return `If you sent on the wrong network, funds may not be recoverable. Reply with your order ID (shown under Waiting for payment) and the tx hash from your wallet. For urgent cases email support@nexastore.app with those details.`;
+  }
+  if (/tutorial|guide|how to|first time|beginner/.test(q)) {
+    return `Open the wallet tutorial from the payment screen (How to pay with ${wallet}). Order of operations: open wallet → Polygon network → buy USDT → return here → Pay in browser wallet.`;
+  }
+  return `I'm NexaPay Assistant. I can help with Polygon network setup, buying USDT, MetaMask / browser wallets, and failed payments. Ask something specific (e.g. "how do I switch to Polygon?") or open the wallet tutorial. Order ID helps if payment is stuck.`;
+}
+
+function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text: 'Hi — I\'m NexaPay Assistant. Tell me what went wrong (network, gas, MetaMask popup, pending order…) or ask how to buy USDT on Polygon.',
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const listRef = useRef(null);
+  const bg = dark ? 'bg-[#0f172a]' : 'bg-white';
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200';
+
+  useEffect(() => {
+    listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  const send = (preset) => {
+    const content = (preset || input || '').trim();
+    if (!content) return;
+    setInput('');
+    setMessages((m) => [...m, { role: 'user', text: content }]);
+    setTimeout(() => {
+      const reply = aiSupportReply(content, { walletName: wallet?.name, orderId });
+      setMessages((m) => [...m, { role: 'assistant', text: reply }]);
+    }, 350);
+  };
+
+  const quick = [
+    'How do I switch to Polygon?',
+    'Transaction likely to fail',
+    'How to buy USDT',
+    'Payment still pending',
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[180] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className={`w-full max-w-md max-h-[88vh] flex flex-col rounded-t-2xl sm:rounded-2xl border shadow-2xl ${bg} ${dark ? 'border-white/10' : 'border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
+        <div className={`flex items-center justify-between px-4 py-3 border-b ${dark ? 'border-white/10' : 'border-gray-100'}`}>
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
+              <LifeBuoy size={18} className="text-white" />
+            </div>
+            <div>
+              <p className={`font-bold text-[14px] ${text}`}>Support & feedback</p>
+              <p className={`text-[11px] ${subtext}`}>AI assistant · NexaPay / NexaStore</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X size={18} className={text} /></button>
+        </div>
+
+        <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[220px]">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
+                m.role === 'user'
+                  ? 'bg-violet-600 text-white rounded-br-md'
+                  : (dark ? 'bg-white/10 text-slate-100 rounded-bl-md' : 'bg-gray-100 text-gray-800 rounded-bl-md')
+              }`}>{m.text}</div>
+            </div>
+          ))}
+          {orderId && (
+            <p className={`text-[10px] text-center font-mono ${subtext}`}>Order context: {orderId}</p>
+          )}
+        </div>
+
+        <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+          {quick.map((q) => (
+            <button key={q} type="button" onClick={() => send(q)}
+              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${dark ? 'border-white/15 text-slate-300 hover:bg-white/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              {q}
+            </button>
+          ))}
+        </div>
+
+        <div className={`px-3 pb-3 pt-1 flex gap-2 border-t ${dark ? 'border-white/10' : 'border-gray-100'}`}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+            placeholder="Describe the issue…"
+            className={`flex-1 px-3 py-2.5 rounded-xl text-[13px] outline-none border ${dark ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-gray-200 text-gray-900'}`}
+          />
+          <button type="button" onClick={() => send()} className="px-4 rounded-xl bg-violet-600 text-white text-[13px] font-bold">Send</button>
+        </div>
+        {onOpenTutorial && (
+          <button type="button" onClick={onOpenTutorial}
+            className={`mx-3 mb-3 text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+            <BookOpen size={13} /> Open wallet tutorial
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWallet, onOpenTutorials, onOpenTutorial, dark }) {
   const price = Math.max(0, parseFloat(app?.price) || 0);
   const lockedPrice = price.toFixed(2);
@@ -1036,7 +1202,12 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const [error, setError] = useState('');
   const [order, setOrder] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
+  const [firstTime] = useState(() => {
+    try { return !localStorage.getItem('nexastore_paid_once'); } catch { return true; }
+  });
   const pollRef = useRef(null);
+  const warnings = walletCheckoutWarnings(wallet);
 
   const WORKER_URL = 'https://nexapay-gateway.laptopperson4.workers.dev';
   const PAY_ADDRESS = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
@@ -1068,6 +1239,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
         if (sd.paid || status === 'paid' || status === 'completed' || status === 'success') {
           clearInterval(pollRef.current);
           setStage('done');
+          try { localStorage.setItem('nexastore_paid_once', '1'); } catch {}
           if (session && profile) {
             markPurchased(app.id, profile.id);
             sbInsert('purchases', {
@@ -1191,7 +1363,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
             </div>
 
             {stage === 'form' && (
-              <div className="px-4 py-4 space-y-4">
+              <div className="px-4 py-4 space-y-3">
                 <div className="flex justify-between items-baseline">
                   <div>
                     <p className={`text-xs ${subtext}`}>You pay</p>
@@ -1204,11 +1376,38 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   </p>
                 </div>
 
+                {firstTime && (
+                  <div className={`rounded-xl border p-3 ${dark ? 'bg-violet-500/10 border-violet-500/25' : 'bg-violet-50 border-violet-100'}`}>
+                    <p className={`text-[12.5px] font-bold ${dark ? 'text-violet-200' : 'text-violet-800'}`}>First time buying?</p>
+                    <p className={`text-[11.5px] mt-1 leading-relaxed ${dark ? 'text-violet-200/80' : 'text-violet-700'}`}>
+                      Follow this order: open your wallet → set network to <b>Polygon</b> → buy at least <b>{lockedPrice} USDT</b> (+ a little POL for gas) → come back and pay.
+                    </p>
+                    {onOpenTutorial && wallet && (
+                      <button type="button" onClick={() => {
+                        const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
+                        onOpenTutorial(w?.tutorialId || null, wallet.name);
+                      }}
+                        className={`mt-2 w-full py-2 rounded-lg text-[12px] font-bold flex items-center justify-center gap-1.5 ${dark ? 'bg-violet-500/25 text-violet-200' : 'bg-white text-violet-700 border border-violet-200'}`}>
+                        <BookOpen size={13} /> Watch {wallet.name} tutorial
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-[12px] font-bold ${text}`}>1. Buy USDT in your wallet</p>
-                  <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
-                    Open your wallet and buy at least <b className={text}>{lockedPrice} USDT</b> on the <b className={text}>Polygon</b> network. Come back here when you have enough.
-                  </p>
+                  <p className={`text-[12px] font-bold ${text}`}>1. Open wallet · Polygon · buy USDT</p>
+                  <ol className={`text-[11.5px] space-y-1 list-decimal list-inside leading-relaxed ${subtext}`}>
+                    <li>Open <b className={text}>{wallet?.name || 'your wallet'}</b></li>
+                    <li>Set network to <b className={text}>Polygon Mainnet</b></li>
+                    <li>Buy at least <b className={text}>{lockedPrice} USDT</b> on Polygon</li>
+                    <li>Come back here when balances are ready</li>
+                  </ol>
+                  {warnings?.length > 0 && (
+                    <div className={`mt-2 rounded-lg px-2.5 py-2 text-[11px] space-y-1 ${dark ? 'bg-amber-500/10 text-amber-100 border border-amber-500/20' : 'bg-amber-50 text-amber-900 border border-amber-100'}`}>
+                      <p className="font-bold">{wallet?.name || 'Wallet'} warnings</p>
+                      {warnings.map((w, i) => <p key={i}>• {w}</p>)}
+                    </div>
+                  )}
                   <a
                     href={walletBuyOpenUrl(wallet)}
                     target="_blank"
@@ -1220,9 +1419,9 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 </div>
 
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-[12px] font-bold ${text}`}>2. Send payment</p>
+                  <p className={`text-[12px] font-bold ${text}`}>2. Pay in this browser</p>
                   <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
-                    Continues to MetaMask with the <b className={text}>receiver</b> and <b className={text}>{lockedPrice} USDT</b> already filled on Polygon.
+                    Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on Polygon to NexaPay — no extra download pages.
                   </p>
                   {error && <p className="text-xs text-red-400 text-center">{error}</p>}
                   <button
@@ -1232,9 +1431,14 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                     className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {busy ? <Loader2 size={16} className="animate-spin" /> : null}
-                    {busy ? 'Opening MetaMask…' : 'Continue to Payment'}
+                    {busy ? 'Opening wallet…' : 'Continue to Payment'}
                   </button>
                 </div>
+
+                <button type="button" onClick={() => setShowSupport(true)}
+                  className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'text-cyan-300 hover:bg-white/5' : 'text-cyan-700 hover:bg-cyan-50'}`}>
+                  <MessageCircle size={14} /> Support / feedback (AI)
+                </button>
 
                 <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial · Polygon USDT only</p>
               </div>
@@ -1307,6 +1511,13 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
                 <button
                   type="button"
+                  onClick={() => setShowSupport(true)}
+                  className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'text-cyan-300 hover:bg-white/5' : 'text-cyan-700'}`}
+                >
+                  <MessageCircle size={14} /> Support / feedback (AI)
+                </button>
+                <button
+                  type="button"
                   onClick={onClose}
                   className={`w-full py-2.5 rounded-xl text-[13px] font-semibold border ${dark ? 'border-white/15 text-slate-300 hover:bg-white/5' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
                 >
@@ -1350,6 +1561,19 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           <p className={`text-[11px] text-center ${subtext}`}>Powered by NexaPay · Send USDT on Polygon to complete payment</p>
         </div>
       </div>
+      {showSupport && (
+        <SupportAssistant
+          dark={dark}
+          wallet={wallet}
+          orderId={order?.orderId}
+          onClose={() => setShowSupport(false)}
+          onOpenTutorial={wallet && onOpenTutorial ? () => {
+            setShowSupport(false);
+            const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
+            onOpenTutorial(w?.tutorialId || null, wallet.name);
+          } : onOpenTutorials}
+        />
+      )}
     </div>
   );
 }
@@ -1357,6 +1581,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
 function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
+  const [showSupport, setShowSupport] = useState(false);
   const bg = dark ? 'bg-transparent' : 'bg-transparent';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
@@ -1499,6 +1724,13 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
             <ChevronRight size={17} className={subtext} />
           </button>
         )}
+        <button type="button" onClick={() => setShowSupport(true)}
+          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+          <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+            <MessageCircle size={18} className="text-cyan-500" /> Support & feedback (AI)
+          </span>
+          <ChevronRight size={17} className={subtext} />
+        </button>
         <button onClick={onOpenDeveloper}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
           <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
@@ -1523,6 +1755,18 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
           <ChevronRight size={17} className="text-red-400" />
         </button>
       </div>
+      {showSupport && (
+        <SupportAssistant
+          dark={dark}
+          wallet={wallet}
+          onClose={() => setShowSupport(false)}
+          onOpenTutorial={onOpenTutorial && wallet ? () => {
+            setShowSupport(false);
+            const w = RECOMMENDED_WALLETS.find(x => x.id === wallet.provider || x.name === wallet.name);
+            onOpenTutorial(w?.tutorialId || null, wallet.name);
+          } : onOpenTutorials}
+        />
+      )}
     </div>
   );
 }
