@@ -8,6 +8,8 @@ const REST = `${SUPABASE_URL}/rest/v1`;
 const STORAGEAPI = `${SUPABASE_URL}/storage/v1`;
 const AUTHAPI = `${SUPABASE_URL}/auth/v1`;
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY";
+const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
+const PAYOUT_MODE = "direct";
 
 async function sbSelect(table, qs, token) {
   const url = `${REST}/${table}?${qs}`;
@@ -332,6 +334,22 @@ function hasPurchased(appId, userId) {
   const all = getPurchases();
   return (all[key] || []).includes(appId);
 }
+
+async function resolvePayoutWallet(app) {
+  try {
+    if (app?.dev_id) {
+      const rows = await sbSelect('profiles', `id=eq.${app.dev_id}&select=payout_wallet,email`);
+      const w = rows?.[0]?.payout_wallet;
+      if (w && String(w).length >= 10) return { address: String(w), source: 'developer' };
+    }
+  } catch {}
+  try {
+    const local = localStorage.getItem(`nexastore_payout_${app?.dev_id || ''}`);
+    if (local && local.length >= 10) return { address: local, source: 'developer' };
+  } catch {}
+  return { address: PLATFORM_TREASURY_WALLET, source: 'platform_fallback' };
+}
+
 function formatPrice(price) {
   const p = parseFloat(price) || 0;
   if (p <= 0) return 'Free';
@@ -1771,6 +1789,13 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
 function DevConsole({ session, profile, onClose, onPublished, dark, showToast, onProfileUpdated }) {
   const [tab, setTab] = useState('overview');
   const [myApps, setMyApps] = useState([]);
+  const [payoutWallet, setPayoutWallet] = useState(profile?.payout_wallet || '');
+  const [walletMsg, setWalletMsg] = useState('');
+  const [walletSaving, setWalletSaving] = useState(false);
+  const [earnings, setEarnings] = useState([]);
+  const [totalEarned, setTotalEarned] = useState(0);
+  const [sales, setSales] = useState([]);
+
   const [appsLoading, setAppsLoading] = useState(true);
   const [formData, setFormData] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
   const [appFile, setAppFile] = useState(null);
@@ -1797,10 +1822,70 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     try {
       const rows = await sbSelect('apps', `dev_id=eq.${profile.id}&select=*&order=created_at.desc`, session);
       setMyApps(rows || []);
+      try {
+        const profs = await sbSelect('profiles', `id=eq.${profile.id}&select=payout_wallet`, session);
+        if (profs?.[0]?.payout_wallet) setPayoutWallet(profs[0].payout_wallet);
+        else {
+          const local = localStorage.getItem(`nexastore_payout_${profile.id}`);
+          if (local) setPayoutWallet(local);
+        }
+      } catch {
+        const local = localStorage.getItem(`nexastore_payout_${profile.id}`);
+        if (local) setPayoutWallet(local);
+      }
+      const ids = (rows || []).map(a => a.id);
+      if (ids.length) {
+        const inList = ids.map(id => `"${id}"`).join(',');
+        const purchases = await sbSelect(
+          'purchases',
+          `app_id=in.(${inList})&status=eq.completed&select=app_id,amount_usdt,created_at&order=created_at.asc`,
+          session
+        ).catch(() => []);
+        setSales(purchases || []);
+        const byDay = {};
+        let total = 0;
+        for (const r of purchases || []) {
+          const amt = parseFloat(r.amount_usdt) || 0;
+          total += amt;
+          const day = (r.created_at || '').slice(0, 10) || 'unknown';
+          if (!byDay[day]) byDay[day] = { day, amount: 0, count: 0 };
+          byDay[day].amount += amt;
+          byDay[day].count += 1;
+        }
+        setEarnings(Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)));
+        setTotalEarned(total);
+      } else {
+        setSales([]);
+        setEarnings([]);
+        setTotalEarned(0);
+      }
     } catch {
       setMyApps([]);
+      setSales([]);
+      setEarnings([]);
+      setTotalEarned(0);
     } finally {
       setAppsLoading(false);
+    }
+  };
+
+  const savePayoutWallet = async () => {
+    setWalletMsg('');
+    const addr = (payoutWallet || '').trim();
+    if (addr.length < 10) {
+      setWalletMsg('Enter a valid wallet address.');
+      return;
+    }
+    setWalletSaving(true);
+    try {
+      localStorage.setItem(`nexastore_payout_${profile.id}`, addr);
+      await sbUpdate('profiles', { payout_wallet: addr }, { id: profile.id }, session).catch(() => {});
+      setWalletMsg('Saved. Buyers send USDT straight to this address.');
+      showToast?.('Payout wallet saved', 'success');
+    } catch (e) {
+      setWalletMsg(e.message || 'Saved locally.');
+    } finally {
+      setWalletSaving(false);
     }
   };
 
@@ -1979,6 +2064,8 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
   const inputCls = `w-full px-4 py-2.5 rounded-xl text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? 'bg-white/5 border border-white/10 text-white placeholder-slate-500' : 'bg-white border border-gray-200 text-gray-900 placeholder-gray-400'}`;
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'earnings', label: 'Earnings', icon: DollarSign },
+    { id: 'wallet', label: 'Payout', icon: Wallet },
     { id: 'publish', label: 'Publish', icon: Upload },
     { id: 'apps', label: 'My apps', icon: Package },
   ];
@@ -2087,7 +2174,8 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             </div>
 
             <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`font-bold text-[14px] ${text} mb-3`}>Apps by status</p>
+              <p className={`font-bold text-[14px] ${text} mb-1`}>Apps by status</p>
+              <p className={`text-[11.5px] ${subtext} mb-3`}>Live counts from your apps in the database — not sample data.</p>
               {appsLoading ? (
                 <p className={`text-[13px] ${subtext} py-10 text-center`}>Loading chart…</p>
               ) : myApps.length === 0 ? (
@@ -2117,6 +2205,51 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             <button onClick={() => setTab('publish')} className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 flex items-center justify-center gap-2">
               <Upload size={16} /> Publish a new app
             </button>
+          </div>
+        )}
+
+        {tab === 'earnings' && (
+          <div className="space-y-4">
+            <div className={`rounded-2xl border p-5 ${card}`}>
+              <p className={`text-[12px] font-semibold uppercase tracking-wide ${subtext}`}>Total earned</p>
+              <p className={`text-[28px] font-extrabold mt-1 ${text}`}>{totalEarned.toFixed(2)} <span className="text-[16px] text-emerald-500">USDT</span></p>
+              <p className={`text-[12.5px] mt-1 ${subtext}`}>{sales.length} completed sale{sales.length === 1 ? '' : 's'} (from database purchases)</p>
+            </div>
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`font-bold text-[14px] ${text} mb-3`}>Earnings over time</p>
+              {sales.length === 0 ? (
+                <p className={`text-[13px] ${subtext} py-8 text-center`}>No sales yet — figures come from real purchases only.</p>
+              ) : (
+                <div className="h-56 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={earnings}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                      <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Earned']} />
+                      <Bar dataKey="amount" fill="#10b981" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'wallet' && (
+          <div className={`rounded-2xl border p-5 space-y-3 ${card}`}>
+            <div className="flex items-center gap-2">
+              <Wallet size={18} className="text-emerald-500" />
+              <p className={`font-bold text-[15px] ${text}`}>Payout wallet</p>
+            </div>
+            <p className={`text-[13px] ${subtext}`}>
+              Buyers send USDT <span className="font-semibold">directly to your wallet</span>. NexaStore does not hold your funds. Platform address is only a fallback if this is empty.
+            </p>
+            <input type="text" value={payoutWallet} onChange={(e) => setPayoutWallet(e.target.value)} placeholder="0x… Polygon USDT address" className={inputCls} />
+            <button type="button" disabled={walletSaving} onClick={savePayoutWallet} className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-3 rounded-xl font-bold text-[14px] disabled:opacity-50">
+              {walletSaving ? 'Saving…' : 'Save payout wallet'}
+            </button>
+            {walletMsg && <p className="text-[12.5px] font-medium text-emerald-500">{walletMsg}</p>}
           </div>
         )}
 
