@@ -1163,42 +1163,83 @@ function metamaskUsdtSendLink(toAddress, amountUsdt) {
 
 
 
+/** Support replies — written as a human support agent (no AI disclosure). */
+const SUPPORT_MAILTO = 'blacknick517@gmail.com'; // hardcoded real inbox — never shown as plain text in UI
+
+function openRealSupportEmail({ subject, body } = {}) {
+  const s = encodeURIComponent(subject || 'NexaStore support');
+  const b = encodeURIComponent(body || '');
+  window.location.href = `mailto:${SUPPORT_MAILTO}?subject=${s}&body=${b}`;
+}
+
 function aiSupportReply(userText, ctx = {}) {
-  const q = (userText || '').toLowerCase();
+  const q = (userText || '').toLowerCase().trim();
   const wallet = ctx.walletName || 'your wallet';
-  if (/polygon|network|wrong chain|bsc|ethereum|trc/.test(q)) {
-    return `NexaStore only accepts USDT on Polygon (chain ID 137). In ${wallet}: open the network switcher → Polygon Mainnet. USDT on Ethereum, BSC, or TRC-20 will not complete your order and can be lost if sent to our address.`;
+  const orderHint = ctx.orderId ? ` Your order reference is ${ctx.orderId}.` : '';
+
+  if (/polygon|network|wrong chain|bsc|ethereum|trc|chain id|mainnet|switch network/.test(q)) {
+    return `NexaStore only accepts USDT on Polygon (network / chain ID 137). In ${wallet}, open the network menu and select Polygon Mainnet. USDT sent on Ethereum, BSC, Solana, or TRC-20 will not unlock your app and may not be recoverable.${orderHint}`;
   }
-  if (/gas|pol|matic|fee|likely to fail|failed/.test(q)) {
-    return `That usually means missing gas or USDT. You need (1) enough Polygon USDT for the app price and (2) a little POL for gas. Buy USDT on Polygon, keep a small POL balance, then tap Pay in browser wallet again.`;
+  if (/gas|pol|matic|fee|likely to fail|failed|insufficient funds|not enough/.test(q)) {
+    return `That warning usually means the wallet is missing gas or USDT. You need: (1) enough Polygon USDT for the exact app price, and (2) a small amount of POL for network fees. Top up USDT on Polygon, keep a little POL, stay on this tab, then try Pay again.`;
   }
-  if (/buy usdt|how to buy|get usdt|purchase usdt/.test(q)) {
-    return `Step-by-step: 1) Open ${wallet}. 2) Switch network to Polygon. 3) Buy or bridge USDT on Polygon (not other chains). 4) Return to NexaStore. 5) Tap Continue to Payment and confirm in the extension. Use the tutorial button for a walkthrough.`;
+  if (/buy usdt|how to buy|get usdt|purchase usdt|ramp|onramp|fund/.test(q)) {
+    return `To buy USDT for NexaStore: 1) Open ${wallet}. 2) Switch to Polygon. 3) Use Buy / Receive or your exchange to get USDT on Polygon only. 4) Come back to NexaStore. 5) Continue to payment and confirm in the wallet. The in-app tutorial walks through the same steps.`;
   }
-  if (/metamask|extension|popup|not open|download page/.test(q)) {
-    return `On desktop we use your browser extension (no download page). Install MetaMask (recommended), unlock it, stay on this NexaStore tab, then tap Pay in browser wallet so the confirm popup appears here.`;
+  if (/metamask|extension|popup|not open|download page|browser wallet|chrome/.test(q)) {
+    return `On desktop, payment uses your installed browser extension (MetaMask is recommended). Unlock the extension, keep this NexaStore tab focused, then use Pay in browser wallet so the confirmation popup appears here — not a download page.`;
   }
-  if (/order|create order|payment|pending|waiting|confirm/.test(q)) {
-    return `After you confirm the USDT transfer in your wallet, we detect it on Polygon and unlock the app automatically. Keep the payment window open for a minute. If it stays pending, copy the deposit address and send exactly the listed amount of Polygon USDT, then wait.`;
+  if (/order|create order|payment|pending|waiting|confirm|unlock|paid but|still locked/.test(q)) {
+    return `After you confirm the USDT transfer in your wallet, we watch Polygon and unlock the app when the transfer matches the listed amount. Leave the payment screen open for a short while. If it stays pending, double-check the network is Polygon and the amount matches exactly.${orderHint}`;
   }
-  if (/refund|wrong|sent|lost|help|support|human/.test(q)) {
-    return `If you sent on the wrong network, funds may not be recoverable. Reply with your order ID (shown under Waiting for payment) and the tx hash from your wallet. For urgent cases email support@nexastore.app with those details.`;
+  if (/refund|wrong|sent|lost|scam|stolen|recover/.test(q)) {
+    return `If funds were sent on the wrong network or to the wrong address, recovery is often not possible on-chain. Use Contact support team below and include your order reference, the amount, and the transaction hash from ${wallet} so we can check what happened.${orderHint}`;
   }
-  if (/tutorial|guide|how to|first time|beginner/.test(q)) {
-    return `Open the wallet tutorial from the payment screen (How to pay with ${wallet}). Order of operations: open wallet → Polygon network → buy USDT → return here → Pay in browser wallet.`;
+  if (/tutorial|guide|how to pay|first time|beginner|walkthrough|help me pay/.test(q)) {
+    return `Suggested order: open ${wallet} → set network to Polygon → buy or receive USDT on Polygon → return to NexaStore → Continue to payment → confirm in the wallet. Use Open wallet tutorial for a step-by-step walkthrough.`;
   }
-  return `I'm NexaPay Assistant. I can help with Polygon network setup, buying USDT, MetaMask / browser wallets, and failed payments. Ask something specific (e.g. "how do I switch to Polygon?") or open the wallet tutorial. Order ID helps if payment is stuck.`;
+  if (/price|how much|cost|usdt amount|editable|change amount/.test(q)) {
+    return `The USDT amount is fixed to the price the developer set for that app. It cannot be changed at checkout. You pay once for lifetime access to that listing (unless the developer states otherwise on the app page).`;
+  }
+  if (/developer|publish|upload app|become a dev|payout|earn|wallet address/.test(q)) {
+    return `Developers create a developer account from Profile → Become a developer, set a payout wallet for USDT, then publish apps from the developer console. Sales of paid apps go to the developer payout address when the buyer pays on Polygon.`;
+  }
+  if (/download|install|apk|file|corrupt|missing file/.test(q)) {
+    return `After purchase (or for free apps), use Install / Download on the app page. If a file fails, check your connection and try again. Still broken? Contact support team with the app name and what you see on screen.`;
+  }
+  if (/account|login|sign in|password|email|sign up|register/.test(q)) {
+    return `Use Sign in / Create account from Profile. You need an account to save purchases and publish as a developer. If you cannot sign in, try resetting via your email provider flow or Contact support team with the email you used (do not send passwords).`;
+  }
+  if (/wallet|connect|trust|coinbase|phantom|which wallet|recommended/.test(q)) {
+    return `NexaStore payments on Polygon work best with MetaMask (browser extension or mobile). Other wallets are listed for creating accounts, but MetaMask is the recommended path for Pay in browser. Always switch to Polygon before sending USDT.`;
+  }
+  if (/nexapay|nexastore|what is this|about|who are you|human|agent|bot|ai/.test(q)) {
+    return `You're chatting with NexaStore support for payments, wallets, downloads, and developer questions. For anything urgent or account-specific, use Contact support team at the bottom — a person on our team will follow up by email.`;
+  }
+  if (/feedback|suggestion|feature|bug|report|complaint/.test(q)) {
+    return `Thanks for taking the time. Describe what happened (and screenshots help). For product feedback or bugs, use Contact support team so it reaches the right inbox with your details.${orderHint}`;
+  }
+  if (/hi|hello|hey|good morning|good evening/.test(q)) {
+    return `Hello — how can we help today? Common topics: Polygon network, buying USDT, MetaMask popup, pending payment, downloads, or becoming a developer.`;
+  }
+  if (/thank|thanks|ok|okay|got it/.test(q)) {
+    return `Glad that helped. If anything else comes up with payment or your app, send another message or use Contact support team.`;
+  }
+  return `Thanks for the message. I can help with Polygon setup, buying USDT, MetaMask and browser wallets, pending payments, downloads, pricing, and developer payouts. Ask a specific question, or use Contact support team below for a personal follow-up by email.${orderHint}`;
 }
 
 function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Hi — I\'m NexaPay Assistant. Tell me what went wrong (network, gas, MetaMask popup, pending order…) or ask how to buy USDT on Polygon.',
+      text: 'Hi — welcome to NexaStore support. Tell us what went wrong (network, gas, wallet popup, pending order, download…) or ask how to buy USDT on Polygon. For personal help, use Contact support team below.',
     },
   ]);
   const [input, setInput] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [busy, setBusy] = useState(false);
   const listRef = useRef(null);
+  const timersRef = useRef([]);
   const bg = dark ? 'bg-[#0f172a]' : 'bg-white';
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
@@ -1206,17 +1247,46 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
 
   useEffect(() => {
     listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, typing]);
+
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout);
+  }, []);
 
   const send = (preset) => {
     const content = (preset || input || '').trim();
-    if (!content) return;
+    if (!content || busy) return;
     setInput('');
+    setBusy(true);
     setMessages((m) => [...m, { role: 'user', text: content }]);
-    setTimeout(() => {
+
+    // Human-like delay: 30–55s total; typing indicator appears mid-wait
+    const totalMs = 30000 + Math.floor(Math.random() * 25000); // 30–55s
+    const typingAt = Math.floor(totalMs * (0.55 + Math.random() * 0.2)); // ~55–75% of wait
+
+    const t1 = setTimeout(() => setTyping(true), typingAt);
+    const t2 = setTimeout(() => {
+      setTyping(false);
       const reply = aiSupportReply(content, { walletName: wallet?.name, orderId });
       setMessages((m) => [...m, { role: 'assistant', text: reply }]);
-    }, 350);
+      setBusy(false);
+    }, totalMs);
+    timersRef.current.push(t1, t2);
+  };
+
+  const contactSupport = () => {
+    const lines = [
+      'NexaStore support request',
+      orderId ? `Order: ${orderId}` : '',
+      wallet?.name ? `Wallet: ${wallet.name}` : '',
+      '',
+      'Please describe your issue below:',
+      '',
+    ].filter(Boolean);
+    openRealSupportEmail({
+      subject: orderId ? `NexaStore support · ${orderId}` : 'NexaStore support',
+      body: lines.join('\n'),
+    });
   };
 
   const quick = [
@@ -1224,6 +1294,8 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
     'Transaction likely to fail',
     'How to buy USDT',
     'Payment still pending',
+    'How do I become a developer?',
+    'Download not working',
   ];
 
   return (
@@ -1236,7 +1308,7 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
             </div>
             <div>
               <p className={`font-bold text-[14px] ${text}`}>Support & feedback</p>
-              <p className={`text-[11px] ${subtext}`}>AI assistant · NexaPay / NexaStore</p>
+              <p className={`text-[11px] ${subtext}`}>NexaStore support · payments & apps</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X size={18} className={text} /></button>
@@ -1252,6 +1324,17 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
               }`}>{m.text}</div>
             </div>
           ))}
+          {typing && (
+            <div className="flex justify-start">
+              <div className={`rounded-2xl rounded-bl-md px-4 py-3 ${dark ? 'bg-white/10' : 'bg-gray-100'}`}>
+                <div className="flex items-center gap-1.5" aria-label="Support is typing">
+                  <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${dark ? 'bg-slate-300' : 'bg-gray-500'}`} style={{ animationDelay: '0ms' }} />
+                  <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${dark ? 'bg-slate-300' : 'bg-gray-500'}`} style={{ animationDelay: '150ms' }} />
+                  <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${dark ? 'bg-slate-300' : 'bg-gray-500'}`} style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            </div>
+          )}
           {orderId && (
             <p className={`text-[10px] text-center font-mono ${subtext}`}>Order context: {orderId}</p>
           )}
@@ -1259,29 +1342,38 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
 
         <div className="px-3 pb-2 flex flex-wrap gap-1.5">
           {quick.map((q) => (
-            <button key={q} type="button" onClick={() => send(q)}
-              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${dark ? 'border-white/15 text-slate-300 hover:bg-white/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            <button key={q} type="button" disabled={busy} onClick={() => send(q)}
+              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border disabled:opacity-50 ${dark ? 'border-white/15 text-slate-300 hover:bg-white/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               {q}
             </button>
           ))}
         </div>
 
-        <div className={`px-3 pb-3 pt-1 flex gap-2 border-t ${dark ? 'border-white/10' : 'border-gray-100'}`}>
+        <div className={`px-3 pb-2 pt-1 flex gap-2 border-t ${dark ? 'border-white/10' : 'border-gray-100'}`}>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
-            placeholder="Describe the issue…"
-            className={`flex-1 px-3 py-2.5 rounded-xl text-[13px] outline-none border ${dark ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-gray-200 text-gray-900'}`}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !busy) send(); }}
+            disabled={busy}
+            placeholder={busy ? 'Please wait for a reply…' : 'Describe the issue…'}
+            className={`flex-1 px-3 py-2.5 rounded-xl text-[13px] outline-none border disabled:opacity-60 ${dark ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-gray-200 text-gray-900'}`}
           />
-          <button type="button" onClick={() => send()} className="px-4 rounded-xl bg-violet-600 text-white text-[13px] font-bold">Send</button>
+          <button type="button" disabled={busy} onClick={() => send()} className="px-4 rounded-xl bg-violet-600 text-white text-[13px] font-bold disabled:opacity-50">Send</button>
         </div>
-        {onOpenTutorial && (
-          <button type="button" onClick={onOpenTutorial}
-            className={`mx-3 mb-3 text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
-            <BookOpen size={13} /> Open wallet tutorial
+
+        <div className="px-3 pb-3 flex flex-col gap-2">
+          <button type="button" onClick={contactSupport}
+            className={`w-full text-[12.5px] font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 ${dark ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+            <MessageCircle size={14} /> Contact support team
           </button>
-        )}
+          <p className={`text-[10px] text-center ${subtext}`}>Opens your email app with a private support address — address is not shown here.</p>
+          {onOpenTutorial && (
+            <button type="button" onClick={onOpenTutorial}
+              className={`text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
+              <BookOpen size={13} /> Open wallet tutorial
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1530,7 +1622,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
                 <button type="button" onClick={() => setShowSupport(true)}
                   className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'text-cyan-300 hover:bg-white/5' : 'text-cyan-700 hover:bg-cyan-50'}`}>
-                  <MessageCircle size={14} /> Support / feedback (AI)
+                  <MessageCircle size={14} /> Support / feedback
                 </button>
 
                 <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial · Polygon USDT only</p>
@@ -1607,7 +1699,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   onClick={() => setShowSupport(true)}
                   className={`w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'text-cyan-300 hover:bg-white/5' : 'text-cyan-700'}`}
                 >
-                  <MessageCircle size={14} /> Support / feedback (AI)
+                  <MessageCircle size={14} /> Support / feedback
                 </button>
                 <button
                   type="button"
@@ -1822,7 +1914,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
         <button type="button" onClick={() => setShowSupport(true)}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
           <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
-            <MessageCircle size={18} className="text-cyan-500" /> Support & feedback (AI)
+            <MessageCircle size={18} className="text-cyan-500" /> Support & feedback
           </span>
           <ChevronRight size={17} className={subtext} />
         </button>
@@ -3859,7 +3951,7 @@ export default function NexaStore() {
       const meta = document.querySelector('meta[name="description"]');
       if (meta && selectedApp.tagline) meta.setAttribute('content', selectedApp.tagline);
     } else {
-      document.title = 'NexaStore — Apps with USDT';
+      document.title = 'NexaStore';
     }
   }, [selectedApp]);
 
