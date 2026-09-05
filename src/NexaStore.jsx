@@ -3375,7 +3375,7 @@ function MobileBottomNav({ view, setView }) {
 }
 
 function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
-  const dark = true;
+  const dark = false;
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -3883,36 +3883,36 @@ export default function NexaStore() {
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
           <div className="hidden md:block">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={true} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
         </>
       )}
       {showAdmin && session && profile && profile.is_owner && (
         <>
           <div className="md:hidden">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={true} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={false} showToast={showToast} />
           </div>
           <div className="hidden md:block">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={true} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={false} showToast={showToast} />
           </div>
         </>
       )}
       {selectedApp && (
         <>
           <div className="md:hidden">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={true} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={false} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
           <div className="hidden md:block">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={true} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={false} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
         </>
       )}
       {showWalletModal && (
         <WalletSetupModal
-          dark={true}
+          dark={false}
           onClose={() => setShowWalletModal(false)}
           onConnected={(w) => {
             setWallet(w);
@@ -3927,7 +3927,7 @@ export default function NexaStore() {
           session={session}
           profile={profile}
           wallet={wallet}
-          dark={true}
+          dark={false}
           onClose={() => setPayApp(null)}
           onNeedWallet={() => setShowWalletModal(true)}
           onOpenTutorials={openTutorialHub}
@@ -3942,14 +3942,14 @@ export default function NexaStore() {
       )}
       {showTutorialHub && !activeTutorial && (
         <TutorialHub
-          dark={true}
+          dark={false}
           onClose={() => setShowTutorialHub(false)}
           onOpenTutorial={(tut) => { setActiveTutorial(tut); setShowTutorialHub(false); }}
         />
       )}
       {activeTutorial && (
         <TutorialViewer
-          dark={true}
+          dark={false}
           tutorial={activeTutorial}
           onBack={() => { setActiveTutorial(null); setShowTutorialHub(true); }}
           onClose={() => { setActiveTutorial(null); setShowTutorialHub(false); }}
