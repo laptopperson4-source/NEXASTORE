@@ -1169,7 +1169,19 @@ const SUPPORT_MAILTO = 'blacknick517@gmail.com'; // hardcoded real inbox — nev
 function openRealSupportEmail({ subject, body } = {}) {
   const s = encodeURIComponent(subject || 'NexaStore support');
   const b = encodeURIComponent(body || '');
-  window.location.href = `mailto:${SUPPORT_MAILTO}?subject=${s}&body=${b}`;
+  const href = `mailto:${SUPPORT_MAILTO}?subject=${s}&body=${b}`;
+  // Prefer a real <a> click — more reliable than only setting location in some browsers
+  try {
+    const a = document.createElement('a');
+    a.href = href;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch {
+    try { window.location.href = href; } catch {}
+  }
+  return href;
 }
 
 function aiSupportReply(userText, ctx = {}) {
@@ -1210,11 +1222,14 @@ function aiSupportReply(userText, ctx = {}) {
   if (/account|login|sign in|password|email|sign up|register/.test(q)) {
     return `Use Sign in / Create account from Profile. You need an account to save purchases and publish as a developer. If you cannot sign in, try resetting via your email provider flow or Contact support team with the email you used (do not send passwords).`;
   }
-  if (/wallet|connect|trust|coinbase|phantom|which wallet|recommended/.test(q)) {
+  if (/trust (nexapulse|nexastore|you|this)|scam|legit|safe|reliable|real company|can i trust/.test(q)) {
+    return `NexaStore is a real app marketplace. Payments use USDT on Polygon to the developer payout address (or platform fallback). NexaPulse Studios is a publisher on the store. Always confirm you are on nexastore-baj.pages.dev, send only the listed USDT amount on Polygon, and use Contact support team if something looks wrong.`;
+  }
+  if (/wallet|connect|coinbase|phantom|which wallet|recommended|trust wallet|metamask only/.test(q)) {
     return `NexaStore payments on Polygon work best with MetaMask (browser extension or mobile). Other wallets are listed for creating accounts, but MetaMask is the recommended path for Pay in browser. Always switch to Polygon before sending USDT.`;
   }
-  if (/nexapay|nexastore|what is this|about|who are you|human|agent|bot|ai/.test(q)) {
-    return `You're chatting with NexaStore support for payments, wallets, downloads, and developer questions. For anything urgent or account-specific, use Contact support team at the bottom — a person on our team will follow up by email.`;
+  if (/nexapay|nexastore|nexapulse|what is this|about|who are you|human|agent|bot|ai/.test(q)) {
+    return `You're chatting with NexaStore support for payments, wallets, downloads, and developer questions. NexaPulse Studios publishes apps here. For anything urgent or account-specific, use Contact support team at the bottom — a person on our team will follow up by email.`;
   }
   if (/feedback|suggestion|feature|bug|report|complaint/.test(q)) {
     return `Thanks for taking the time. Describe what happened (and screenshots help). For product feedback or bugs, use Contact support team so it reaches the right inbox with your details.${orderHint}`;
@@ -1238,6 +1253,7 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [contactStatus, setContactStatus] = useState('');
   const listRef = useRef(null);
   const timersRef = useRef([]);
   const bg = dark ? 'bg-[#0f172a]' : 'bg-white';
@@ -1283,10 +1299,15 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
       'Please describe your issue below:',
       '',
     ].filter(Boolean);
+    setContactStatus('Opening your email app…');
     openRealSupportEmail({
       subject: orderId ? `NexaStore support · ${orderId}` : 'NexaStore support',
       body: lines.join('\n'),
     });
+    // mailto cannot be detected if no client exists — guide the user
+    setTimeout(() => {
+      setContactStatus('If no email app opened, install Gmail/Outlook or set a default mail app, then tap Contact support team again.');
+    }, 1200);
   };
 
   const quick = [
@@ -1358,7 +1379,7 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
             placeholder={busy ? 'Please wait for a reply…' : 'Describe the issue…'}
             className={`flex-1 px-3 py-2.5 rounded-xl text-[13px] outline-none border disabled:opacity-60 ${dark ? 'bg-slate-800 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-gray-200 text-gray-900'}`}
           />
-          <button type="button" disabled={busy} onClick={() => send()} className="px-4 rounded-xl bg-violet-600 text-white text-[13px] font-bold disabled:opacity-50">Send</button>
+          <button type="button" disabled={busy} onClick={() => send()} className={`min-w-[4.5rem] px-4 rounded-xl text-[13px] font-bold disabled:opacity-90 ${busy ? 'bg-emerald-600 text-white' : 'bg-violet-600 text-white'}`}>{busy ? 'Sent' : 'Send'}</button>
         </div>
 
         <div className="px-3 pb-3 flex flex-col gap-2">
@@ -1366,7 +1387,11 @@ function SupportAssistant({ dark, onClose, wallet, orderId, onOpenTutorial }) {
             className={`w-full text-[12.5px] font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 ${dark ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
             <MessageCircle size={14} /> Contact support team
           </button>
-          <p className={`text-[10px] text-center ${subtext}`}>Opens your email app with a private support address — address is not shown here.</p>
+          {contactStatus ? (
+            <p className={`text-[11px] text-center font-medium ${dark ? 'text-amber-300' : 'text-amber-700'}`}>{contactStatus}</p>
+          ) : (
+            <p className={`text-[10px] text-center ${subtext}`}>Opens your email app with a private support address — address is not shown here.</p>
+          )}
           {onOpenTutorial && (
             <button type="button" onClick={onOpenTutorial}
               className={`text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 ${dark ? 'bg-white/10 text-violet-300' : 'bg-violet-50 text-violet-700'}`}>
