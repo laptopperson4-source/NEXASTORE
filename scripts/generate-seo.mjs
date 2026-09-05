@@ -219,6 +219,7 @@ ${urls
   .map(
     (u) => `  <url>
     <loc>${u.loc}</loc>
+    <lastmod>${new Date().toISOString().slice(0, 10)}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>${u.priority}</priority>
   </url>`
