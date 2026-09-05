@@ -928,7 +928,9 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
-                        <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                        {w.recommended && (
+                          <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                        )}
                       </div>
                       <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                       <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
@@ -1765,7 +1767,9 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className={`font-bold text-[13.5px] ${text}`}>{w.name}</p>
-                  <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                  {w.recommended && (
+                    <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${dark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>Recommended</span>
+                  )}
                 </div>
                 <p className={`text-[12px] mt-0.5 ${subtext}`}>{w.desc}</p>
                 <p className={`text-[11px] mt-1 font-medium ${dark ? 'text-violet-300' : 'text-violet-600'}`}>{w.networks}</p>
