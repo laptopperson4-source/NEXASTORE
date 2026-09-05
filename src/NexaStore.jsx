@@ -3668,6 +3668,27 @@ export default function NexaStore() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [selectedApp, setSelectedApp] = useState(null);
+
+  // SEO deep link: /?app=<id> opens that app; static /app/<slug>/ pages link here
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get('app');
+      if (!id || !allApps?.length) return;
+      const found = allApps.find(a => String(a.id) === String(id));
+      if (found) setSelectedApp(found);
+    } catch {}
+  }, [allApps]);
+
+  useEffect(() => {
+    if (selectedApp?.name) {
+      document.title = `${selectedApp.name} · NexaStore`;
+      const meta = document.querySelector('meta[name="description"]');
+      if (meta && selectedApp.tagline) meta.setAttribute('content', selectedApp.tagline);
+    } else {
+      document.title = 'NexaStore — Apps with USDT';
+    }
+  }, [selectedApp]);
+
   const [showAdmin, setShowAdmin] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [installState, setInstallState] = useState(null);

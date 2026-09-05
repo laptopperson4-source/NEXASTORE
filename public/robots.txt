@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nexastore-baj.pages.dev/sitemap.xml
