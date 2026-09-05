@@ -350,6 +350,82 @@ async function resolvePayoutWallet(app) {
   return { address: PLATFORM_TREASURY_WALLET, source: 'platform_fallback' };
 }
 
+
+function getVisitorId() {
+  try {
+    let id = localStorage.getItem('nexastore_vid');
+    if (!id) {
+      id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('nexastore_vid', id);
+    }
+    return id;
+  } catch {
+    return 'anon';
+  }
+}
+
+/** One recorded visit per browser session per calendar day (client-side). */
+async function trackStoreVisit(path = '/') {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const flag = `nexastore_visit_${day}`;
+    if (sessionStorage.getItem(flag)) return;
+    sessionStorage.setItem(flag, '1');
+    await fetch(`${REST}/store_visits`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        path: String(path || '/').slice(0, 200),
+        visitor_id: getVisitorId(),
+        user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : null,
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+
+async function fetchVisitStats(session, rangeKey = '7d') {
+  const now = Date.now();
+  const ranges = {
+    '24h': now - 24 * 60 * 60 * 1000,
+    '7d': now - 7 * 24 * 60 * 60 * 1000,
+    '30d': now - 30 * 24 * 60 * 60 * 1000,
+    all: 0,
+  };
+  const sinceMs = ranges[rangeKey] ?? ranges['7d'];
+  const sinceIso = sinceMs ? new Date(sinceMs).toISOString() : null;
+  let qs = 'select=id,visitor_id,path,created_at&order=created_at.desc&limit=5000';
+  if (sinceIso) qs += `&created_at=gte.${sinceIso}`;
+  try {
+    const rows = await sbSelect('store_visits', qs, session);
+    const list = rows || [];
+    const unique = new Set(list.map(r => r.visitor_id).filter(Boolean));
+    // daily buckets for chart
+    const byDay = {};
+    for (const r of list) {
+      const day = (r.created_at || '').slice(0, 10) || 'unknown';
+      if (!byDay[day]) byDay[day] = { day, visits: 0, visitors: new Set() };
+      byDay[day].visits += 1;
+      if (r.visitor_id) byDay[day].visitors.add(r.visitor_id);
+    }
+    const chart = Object.values(byDay)
+      .map(d => ({ day: d.day, visits: d.visits, visitors: d.visitors.size }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+    return {
+      totalVisits: list.length,
+      uniqueVisitors: unique.size,
+      chart,
+      ok: true,
+    };
+  } catch (e) {
+    return { totalVisits: 0, uniqueVisitors: 0, chart: [], ok: false, error: e.message || String(e) };
+  }
+}
+
 function formatPrice(price) {
   const p = parseFloat(price) || 0;
   if (p <= 0) return 'Free';
@@ -2415,6 +2491,8 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [visitRange, setVisitRange] = useState('7d'); // 24h | 7d | 30d | all
+  const [visitStats, setVisitStats] = useState({ totalVisits: 0, uniqueVisitors: 0, chart: [], ok: true });
 
   const loadData = async () => {
     setLoading(true);
@@ -2429,10 +2507,21 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
       const reviews = await sbSelect('app_reviews', 'select=id', session).catch(() => []);
       setTotalReviews((reviews || []).length);
     } catch {}
+    try {
+      const stats = await fetchVisitStats(session, visitRange);
+      setVisitStats(stats);
+    } catch {}
     setLoading(false);
   };
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    fetchVisitStats(session, visitRange).then(stats => {
+      if (!cancelled) setVisitStats(stats);
+    });
+    return () => { cancelled = true; };
+  }, [visitRange, session]);
 
   const handleApprove = async (app) => {
     setBusyId(app.id);
@@ -2510,6 +2599,83 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
             <p className={`text-2xl font-extrabold ${text}`}>{totalReviews}</p>
             <p className={`text-[12px] ${subtext}`}>Total Reviews</p>
           </div>
+        </div>
+
+        {/* Store visitors */}
+        <div className={`rounded-2xl border p-4 mb-8 ${border} ${card}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <p className={`font-bold text-[14px] ${text}`}>Store visitors</p>
+              <p className={`text-[11.5px] ${subtext}`}>Page opens on NexaStore (1 count per browser per day)</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: '24h', label: '24h' },
+                { id: '7d', label: '7 days' },
+                { id: '30d', label: '30 days' },
+                { id: 'all', label: 'All time' },
+              ].map(r => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setVisitRange(r.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold ${
+                    visitRange === r.id
+                      ? 'bg-violet-600 text-white'
+                      : dark
+                        ? 'bg-white/10 text-slate-300'
+                        : 'bg-white text-gray-600 border border-gray-200'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className={`rounded-xl p-3 ${dark ? 'bg-black/20' : 'bg-white'}`}>
+              <p className={`text-[11px] font-semibold uppercase ${subtext}`}>Visits</p>
+              <p className={`text-2xl font-extrabold text-violet-500`}>{visitStats.totalVisits}</p>
+            </div>
+            <div className={`rounded-xl p-3 ${dark ? 'bg-black/20' : 'bg-white'}`}>
+              <p className={`text-[11px] font-semibold uppercase ${subtext}`}>Unique visitors</p>
+              <p className={`text-2xl font-extrabold text-emerald-500`}>{visitStats.uniqueVisitors}</p>
+            </div>
+          </div>
+          {visitStats.chart?.length > 0 ? (
+            <div className="h-48 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={visitStats.chart}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} />
+                  <Bar dataKey="visits" name="Visits" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="visitors" name="Unique" fill="#10b981" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <p className={`text-[12.5px] ${subtext}`}>
+              {visitStats.ok === false
+                ? 'Visit table not set up yet. Run the SQL below in Supabase once, then traffic will appear here.'
+                : 'No visits in this range yet.'}
+            </p>
+          )}
+          {visitStats.ok === false && (
+            <pre className={`mt-3 text-[10px] p-3 rounded-xl overflow-auto ${dark ? 'bg-black/40 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>{`create table if not exists store_visits (
+  id bigserial primary key,
+  path text,
+  visitor_id text,
+  user_agent text,
+  created_at timestamptz default now()
+);
+create index if not exists store_visits_created_at on store_visits (created_at desc);
+-- Allow anonymous inserts for tracking; owners read via dashboard
+alter table store_visits enable row level security;
+create policy "anyone can insert visits" on store_visits for insert with check (true);
+create policy "authenticated can read visits" on store_visits for select to authenticated using (true);`}</pre>
+          )}
         </div>
 
         {loading && <p className={`text-[13px] ${subtext}`}>Loading…</p>}
@@ -3678,6 +3844,10 @@ export default function NexaStore() {
       if (found) setSelectedApp(found);
     } catch {}
   }, [allApps]);
+
+  useEffect(() => {
+    trackStoreVisit(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/');
+  }, []);
 
   useEffect(() => {
     if (selectedApp?.name) {
