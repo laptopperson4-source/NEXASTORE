@@ -2689,7 +2689,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         )}
 
         {tab === 'publish' && (
-          <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-3.5">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
             <input type="text" placeholder="App name" value={formData.name} onChange={set('name')} className={inputCls} />
             <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
             <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
