@@ -148,6 +148,38 @@ async function sbSignIn(email, password) {
   return r.json();
 }
 
+async function sbResetPassword(email) {
+  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://nexastore-baj.pages.dev/';
+  const r = await fetch(`${AUTHAPI}/recover`, {
+    method: 'POST',
+    body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
+    headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
+  });
+  // Supabase often returns 200 even if email unknown (anti-enumeration)
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Could not send reset email');
+  }
+  return true;
+}
+
+async function sbUpdatePassword(accessToken, newPassword) {
+  const r = await fetch(`${AUTHAPI}/user`, {
+    method: 'PUT',
+    body: JSON.stringify({ password: newPassword }),
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Could not update password');
+  }
+  return r.json();
+}
+
 async function sbRefresh(refreshToken) {
   const r = await fetch(`${AUTHAPI}/token?grant_type=refresh_token`, {
     method: "POST",
@@ -789,9 +821,26 @@ function AuthModal({ onClose, onAuth }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [mode, setMode] = useState('auth'); // auth | forgot
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) { setError('Enter your email first.'); return; }
+    setLoading(true);
+    setError('');
+    setInfo('');
+    try {
+      await sbResetPassword(email.trim());
+      setInfo('If an account exists for that email, a reset link was sent. Check inbox and spam, then sign in with your new password.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -824,19 +873,20 @@ function AuthModal({ onClose, onAuth }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className="bg-white rounded-3xl p-6 w-full max-w-sm">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-extrabold text-gray-900">{isSignUp ? 'Create account' : 'Sign in'}</h2>
+          <h2 className="text-xl font-extrabold text-gray-900">{mode === 'forgot' ? 'Reset password' : (isSignUp ? 'Create account' : 'Sign in')}</h2>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-4">
           <div>
             <label className="block text-[13px] font-semibold text-gray-700 mb-1.5">Email</label>
             <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500" />
           </div>
 
+          {mode !== 'forgot' && (
           <div>
             <label className="block text-[13px] font-semibold text-gray-700 mb-1.5">Password</label>
             <div className="relative">
@@ -847,18 +897,31 @@ function AuthModal({ onClose, onAuth }) {
               </button>
             </div>
           </div>
+          )}
 
           {error && <p className="text-red-600 text-[13px] font-medium">{error}</p>}
           {info && <p className="text-emerald-600 text-[13px] font-medium">{info}</p>}
 
           <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white py-2.5 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 text-[14px]">
-            {loading ? 'Please wait…' : (isSignUp ? 'Sign Up' : 'Sign In')}
+            {loading ? 'Please wait…' : (mode === 'forgot' ? 'Send reset link' : (isSignUp ? 'Sign Up' : 'Sign In'))}
           </button>
         </form>
 
-        <button onClick={() => { setIsSignUp(!isSignUp); setError(''); setInfo(''); }} className="w-full mt-4 text-violet-600 hover:text-violet-700 text-[13px] font-semibold">
-          {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-        </button>
+        {mode === 'auth' && !isSignUp && (
+          <button type="button" onClick={() => { setMode('forgot'); setError(''); setInfo(''); }} className="w-full mt-3 text-gray-500 hover:text-violet-600 text-[12.5px] font-semibold">
+            Forgot password?
+          </button>
+        )}
+        {mode === 'forgot' && (
+          <button type="button" onClick={() => { setMode('auth'); setError(''); setInfo(''); }} className="w-full mt-3 text-gray-500 hover:text-violet-600 text-[12.5px] font-semibold">
+            Back to sign in
+          </button>
+        )}
+        {mode === 'auth' && (
+          <button onClick={() => { setIsSignUp(!isSignUp); setError(''); setInfo(''); }} className="w-full mt-4 text-violet-600 hover:text-violet-700 text-[13px] font-semibold">
+            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2582,7 +2645,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         )}
 
         {tab === 'publish' && (
-          <form onSubmit={handleSubmit} className="space-y-3.5">
+          <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-3.5">
             <input type="text" placeholder="App name" value={formData.name} onChange={set('name')} className={inputCls} />
             <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
             <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
