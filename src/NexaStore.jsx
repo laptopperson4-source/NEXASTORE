@@ -2199,6 +2199,9 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
   const [editingApp, setEditingApp] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', tagline: '', description: '', category: 'Tools', price: '0', version: '1.0.0', releaseNotes: '' });
   const [editSaving, setEditSaving] = useState(false);
+  const [editLogoFile, setEditLogoFile] = useState(null);
+  const [editScreenshots, setEditScreenshots] = useState([]);
+  const [editAppFile, setEditAppFile] = useState(null);
   const [setupName, setSetupName] = useState('');
   const [setupCompany, setSetupCompany] = useState('');
   const [setupBusy, setSetupBusy] = useState(false);
@@ -2421,12 +2424,16 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
       version: app.version || '1.0.0',
       releaseNotes: app.release_notes || '',
     });
+    setEditLogoFile(null);
+    setEditScreenshots([]);
+    setEditAppFile(null);
   };
 
   const saveEdit = async () => {
     if (!editingApp) return;
     setEditSaving(true);
     try {
+      const appId = editingApp.id;
       await sbUpdate('apps', {
         name: editForm.name.trim(),
         tagline: editForm.tagline.trim(),
@@ -2435,9 +2442,46 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         price: parseFloat(editForm.price) || 0,
         version: editForm.version.trim() || '1.0.0',
         release_notes: editForm.releaseNotes.trim(),
-      }, { id: editingApp.id }, session);
+      }, { id: appId }, session);
+
+      if (editLogoFile) {
+        await sbUpload('nexastore-logos', `${appId}/logo.png`, editLogoFile, session);
+        const logoUrl = `${STORAGEAPI}/object/public/nexastore-logos/${appId}/logo.png?t=${Date.now()}`;
+        await sbUpdate('apps', { logo_url: logoUrl }, { id: appId }, session).catch(() => {});
+      }
+
+      if (editScreenshots.length > 0) {
+        await sbDelete('app_screenshots', { app_id: appId }, session).catch(() => {});
+        for (let i = 0; i < editScreenshots.length; i++) {
+          await sbUpload('nexastore-screenshots', `${appId}/${i}.png`, editScreenshots[i], session);
+          const ssUrl = `${STORAGEAPI}/object/public/nexastore-screenshots/${appId}/${i}.png?t=${Date.now()}`;
+          await sbInsert('app_screenshots', { app_id: appId, screenshot_index: i, screenshot_url: ssUrl }, session).catch(() => {});
+        }
+      }
+
+      if (editAppFile) {
+        await sbDelete('app_bits', { app_id: appId }, session).catch(() => {});
+        const CHUNK_SIZE = 45 * 1024 * 1024;
+        const chunks = [];
+        for (let offset = 0; offset < editAppFile.size; offset += CHUNK_SIZE) {
+          chunks.push(editAppFile.slice(offset, offset + CHUNK_SIZE));
+        }
+        for (let i = 0; i < chunks.length; i++) {
+          await sbUpload('nexastore-bits', `${appId}/${i}.bit`, chunks[i], session);
+          await sbInsert('app_bits', { app_id: appId, bit_index: i, bucket_id: 'nexastore-bits', storage_path: `${appId}/${i}.bit`, size_bytes: chunks[i].size }, session);
+        }
+        await sbUpdate('apps', {
+          file_name: editAppFile.name,
+          total_size_bytes: editAppFile.size,
+          bit_count: chunks.length,
+        }, { id: appId }, session).catch(() => {});
+      }
+
       showToast?.('App updated', 'success');
       setEditingApp(null);
+      setEditLogoFile(null);
+      setEditScreenshots([]);
+      setEditAppFile(null);
       await loadMyApps();
       onPublished?.();
     } catch (e) {
@@ -2667,8 +2711,8 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             </div>
 
             <FileDropField label="App file" hint="APK, ZIP, or EXE" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setAppFile(e.target.files?.[0] || null)} files={appFile} dark={dark} />
-            <FileDropField label="Logo" hint="Square image, PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
-            <FileDropField label="Screenshots" hint="At least 3 images" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
+            <FileDropField label="App icon / logo" hint="Square image, PNG or JPG — required" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
+            <FileDropField label="Screenshots" hint="At least 3 images — required" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
 
             {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
             {success && <p className="text-emerald-500 text-[13px] font-medium">{success}</p>}
@@ -2710,8 +2754,12 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
                       <input className={inputCls} value={editForm.version} onChange={setEdit('version')} placeholder="Version" />
                       <input className={inputCls} value={editForm.releaseNotes} onChange={setEdit('releaseNotes')} placeholder="Release notes" />
                     </div>
+                    <p className={`text-[12px] font-semibold ${text}`}>Optional media (replace on save)</p>
+                    <FileDropField label="App icon / logo" hint="Square PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)} files={editLogoFile} dark={dark} />
+                    <FileDropField label="Screenshots" hint="Select all new screenshots (replaces old)" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setEditScreenshots(Array.from(e.target.files || []))} files={editScreenshots} dark={dark} />
+                    <FileDropField label="App file" hint="New APK / ZIP / EXE (optional)" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setEditAppFile(e.target.files?.[0] || null)} files={editAppFile} dark={dark} />
                     <div className="flex gap-2 pt-1">
-                      <button type="button" onClick={() => setEditingApp(null)} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
+                      <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditAppFile(null); }} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
                       <button type="button" onClick={saveEdit} disabled={editSaving} className="flex-1 py-2.5 rounded-xl font-bold text-[13px] text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">{editSaving ? 'Saving…' : 'Save changes'}</button>
                     </div>
                   </div>
