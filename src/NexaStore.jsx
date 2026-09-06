@@ -364,14 +364,42 @@ function getVisitorId() {
   }
 }
 
-/** One recorded visit per browser session per calendar day (client-side). */
+const LOCAL_VISITS_KEY = 'nexastore_visit_log_v1';
+
+function readLocalVisits() {
+  try {
+    const raw = localStorage.getItem(LOCAL_VISITS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendLocalVisit(entry) {
+  try {
+    const list = readLocalVisits();
+    list.push(entry);
+    // keep last 2000
+    localStorage.setItem(LOCAL_VISITS_KEY, JSON.stringify(list.slice(-2000)));
+  } catch {}
+}
+
+/** One recorded visit per browser session per calendar day. Always logs locally; tries Supabase too. */
 async function trackStoreVisit(path = '/') {
   try {
     const day = new Date().toISOString().slice(0, 10);
     const flag = `nexastore_visit_${day}`;
     if (sessionStorage.getItem(flag)) return;
     sessionStorage.setItem(flag, '1');
-    await fetch(`${REST}/store_visits`, {
+    const entry = {
+      path: String(path || '/').slice(0, 200),
+      visitor_id: getVisitorId(),
+      user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : null,
+      created_at: new Date().toISOString(),
+    };
+    appendLocalVisit(entry);
+    const res = await fetch(`${REST}/store_visits`, {
       method: 'POST',
       headers: {
         apikey: ANON_KEY,
@@ -380,12 +408,35 @@ async function trackStoreVisit(path = '/') {
         Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        path: String(path || '/').slice(0, 200),
-        visitor_id: getVisitorId(),
-        user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : null,
+        path: entry.path,
+        visitor_id: entry.visitor_id,
+        user_agent: entry.user_agent,
       }),
-    }).catch(() => {});
+    }).catch(() => null);
+    if (res && !res.ok) {
+      // table missing / RLS — local log still has the visit
+      console.warn('[visits] remote insert failed', res.status);
+    }
   } catch {}
+}
+
+function aggregateVisits(list) {
+  const unique = new Set(list.map(r => r.visitor_id).filter(Boolean));
+  const byDay = {};
+  for (const r of list) {
+    const day = (r.created_at || '').slice(0, 10) || 'unknown';
+    if (!byDay[day]) byDay[day] = { day, visits: 0, visitors: new Set() };
+    byDay[day].visits += 1;
+    if (r.visitor_id) byDay[day].visitors.add(r.visitor_id);
+  }
+  const chart = Object.values(byDay)
+    .map(d => ({ day: d.day, visits: d.visits, visitors: d.visitors.size }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  return {
+    totalVisits: list.length,
+    uniqueVisitors: unique.size,
+    chart,
+  };
 }
 
 async function fetchVisitStats(session, rangeKey = '7d') {
@@ -398,32 +449,44 @@ async function fetchVisitStats(session, rangeKey = '7d') {
   };
   const sinceMs = ranges[rangeKey] ?? ranges['7d'];
   const sinceIso = sinceMs ? new Date(sinceMs).toISOString() : null;
-  let qs = 'select=id,visitor_id,path,created_at&order=created_at.desc&limit=5000';
-  if (sinceIso) qs += `&created_at=gte.${sinceIso}`;
+
+  let remote = [];
+  let remoteOk = false;
+  let remoteError = '';
   try {
+    let qs = 'select=id,visitor_id,path,created_at&order=created_at.desc&limit=5000';
+    if (sinceIso) qs += `&created_at=gte.${encodeURIComponent(sinceIso)}`;
     const rows = await sbSelect('store_visits', qs, session);
-    const list = rows || [];
-    const unique = new Set(list.map(r => r.visitor_id).filter(Boolean));
-    // daily buckets for chart
-    const byDay = {};
-    for (const r of list) {
-      const day = (r.created_at || '').slice(0, 10) || 'unknown';
-      if (!byDay[day]) byDay[day] = { day, visits: 0, visitors: new Set() };
-      byDay[day].visits += 1;
-      if (r.visitor_id) byDay[day].visitors.add(r.visitor_id);
-    }
-    const chart = Object.values(byDay)
-      .map(d => ({ day: d.day, visits: d.visits, visitors: d.visitors.size }))
-      .sort((a, b) => a.day.localeCompare(b.day));
-    return {
-      totalVisits: list.length,
-      uniqueVisitors: unique.size,
-      chart,
-      ok: true,
-    };
+    remote = rows || [];
+    remoteOk = true;
   } catch (e) {
-    return { totalVisits: 0, uniqueVisitors: 0, chart: [], ok: false, error: e.message || String(e) };
+    remoteError = e.message || String(e);
   }
+
+  let local = readLocalVisits();
+  if (sinceIso) {
+    const t0 = new Date(sinceIso).getTime();
+    local = local.filter(r => new Date(r.created_at || 0).getTime() >= t0);
+  }
+
+  // Prefer remote when available; otherwise local (this admin browser)
+  const list = remoteOk && remote.length >= 0 && !remoteError ? remote : local;
+  // If remote empty but local has data, merge unique by visitor_id+day
+  if (remoteOk && remote.length === 0 && local.length > 0) {
+    const agg = aggregateVisits(local);
+    return { ...agg, ok: true, source: 'local' };
+  }
+  if (!remoteOk) {
+    const agg = aggregateVisits(local);
+    return {
+      ...agg,
+      ok: false,
+      error: remoteError,
+      source: 'local',
+    };
+  }
+  const agg = aggregateVisits(list);
+  return { ...agg, ok: true, source: 'remote' };
 }
 
 
@@ -2847,23 +2910,32 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
           ) : (
             <p className={`text-[12.5px] ${subtext}`}>
               {visitStats.ok === false
-                ? 'Visit table not set up yet. Run the SQL below in Supabase once, then traffic will appear here.'
-                : 'No visits in this range yet.'}
+                ? `Cloud table missing or blocked (${(visitStats.error || '').slice(0, 80)}). Showing visits recorded in this browser only until SQL is applied on the correct Supabase project.`
+                : visitStats.source === 'local'
+                  ? 'Showing local visits (this browser). Cloud table is empty or not receiving inserts yet.'
+                  : 'No visits in this range yet.'}
             </p>
           )}
           {visitStats.ok === false && (
-            <pre className={`mt-3 text-[10px] p-3 rounded-xl overflow-auto ${dark ? 'bg-black/40 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>{`create table if not exists store_visits (
+            <pre className={`mt-3 text-[10px] p-3 rounded-xl overflow-auto ${dark ? 'bg-black/40 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>{`-- Run in the SAME Supabase project as NexaStore (mapswtriwoxlscjdakpk)
+create table if not exists public.store_visits (
   id bigserial primary key,
   path text,
   visitor_id text,
   user_agent text,
   created_at timestamptz default now()
 );
-create index if not exists store_visits_created_at on store_visits (created_at desc);
--- Allow anonymous inserts for tracking; owners read via dashboard
-alter table store_visits enable row level security;
-create policy "anyone can insert visits" on store_visits for insert with check (true);
-create policy "authenticated can read visits" on store_visits for select to authenticated using (true);`}</pre>
+create index if not exists store_visits_created_at on public.store_visits (created_at desc);
+alter table public.store_visits enable row level security;
+drop policy if exists "anyone can insert visits" on public.store_visits;
+drop policy if exists "authenticated can read visits" on public.store_visits;
+create policy "anyone can insert visits" on public.store_visits for insert to anon, authenticated with check (true);
+create policy "authenticated can read visits" on public.store_visits for select to authenticated using (true);
+grant usage on schema public to anon, authenticated;
+grant insert on public.store_visits to anon, authenticated;
+grant select on public.store_visits to authenticated;
+grant usage, select on sequence public.store_visits_id_seq to anon, authenticated;
+-- Then: Project Settings → API → Reload schema (or wait 1–2 min)`}</pre>
           )}
         </div>
 
