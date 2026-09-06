@@ -12,10 +12,10 @@ const root = path.join(__dirname, '..');
 const publicDir = path.join(root, 'public');
 
 const SITE = process.env.NEXASTORE_SITE_URL || 'https://nexastore-baj.pages.dev';
-const SUPABASE_URL = process.env.NEXASTORE_SUPABASE_URL || 'https://mapswtriwoxlscjdakpk.supabase.co';
+const SUPABASE_URL = process.env.NEXASTORE_SUPABASE_URL || 'https://svowrpsmthoatgdwqtce.supabase.co';
 const ANON =
   process.env.NEXASTORE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN2b3dycHNtdGhvYXRnZHdxdGNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NjAyMDgsImV4cCI6MjEwMDAzNjIwOH0.zSLhjEyUnhDJjF4G-f9ylASvDv3waZs3JBuK_c-ROtw';
 
 function slugify(name) {
   return String(name || 'app')
@@ -77,7 +77,7 @@ function pageShell({ title, description, canonical, body, jsonLd }) {
 }
 
 async function fetchApps() {
-  const url = `${SUPABASE_URL}/rest/v1/apps?status=eq.approved&select=id,name,tagline,description,category,price,logo_url,dev_id,created_at&order=created_at.desc&limit=100`;
+  const url = `${SUPABASE_URL}/rest/v1/apps?status=eq.approved&select=id,name,tagline,description,category,dev_id,created_at&order=created_at.desc&limit=100`;
   const res = await fetch(url, {
     headers: { apikey: ANON, Authorization: `Bearer ${ANON}` },
   });
