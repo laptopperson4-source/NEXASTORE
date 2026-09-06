@@ -115,7 +115,7 @@ async function sbUpdate(table, data, match, token) {
 }
 async function sbUpload(bucket, path, file, token) {
   const url = `${STORAGEAPI}/object/${bucket}/${path}`;
-  const opts = { method: "POST", body: file, headers: { "apikey": ANON_KEY, "Content-Type": file.type || "application/octet-stream" } };
+  const opts = { method: "POST", body: file, headers: { "apikey": ANON_KEY, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" } };
   if (token) opts.headers["authorization"] = `Bearer ${token}`;
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(await r.text());
@@ -426,6 +426,41 @@ async function fetchVisitStats(session, rangeKey = '7d') {
   }
 }
 
+
+async function uploadProfileAvatar(file, userId, token) {
+  if (!file || !userId || !token) throw new Error('Missing file or session');
+  if (!file.type?.startsWith('image/')) throw new Error('Please choose an image file');
+  if (file.size > 2 * 1024 * 1024) throw new Error('Image must be under 2 MB');
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const path = `${userId}/avatar.${ext}`;
+  // overwrite if exists
+  try {
+    await fetch(`${STORAGEAPI}/object/nexastore-avatars/${path}`, {
+      method: 'DELETE',
+      headers: { apikey: ANON_KEY, authorization: `Bearer ${token}` },
+    });
+  } catch {}
+  await sbUpload('nexastore-avatars', path, file, token);
+  const publicUrl = `${STORAGEAPI}/object/public/nexastore-avatars/${path}?t=${Date.now()}`;
+  try {
+    await sbUpdate('profiles', { avatar_url: publicUrl }, { id: userId }, token);
+  } catch {
+    // column may not exist — still return URL for local use
+  }
+  try {
+    localStorage.setItem(`nexastore_avatar_${userId}`, publicUrl);
+  } catch {}
+  return publicUrl;
+}
+
+function getLocalAvatar(userId) {
+  try {
+    return localStorage.getItem(`nexastore_avatar_${userId}`) || null;
+  } catch {
+    return null;
+  }
+}
+
 function formatPrice(price) {
   const p = parseFloat(price) || 0;
   if (p <= 0) return 'Free';
@@ -449,12 +484,13 @@ function setLocalDevProfile(userId, data) {
 function mergeDevProfile(profile) {
   if (!profile?.id) return profile;
   const local = getLocalDevProfile(profile.id);
-  if (!local) return profile;
+  const localAvatar = getLocalAvatar(profile.id);
   return {
     ...profile,
-    developer_name: profile.developer_name || local.developer_name || null,
-    company_name: profile.company_name || local.company_name || null,
-    is_developer: profile.is_developer || local.is_developer || false,
+    developer_name: profile.developer_name || local?.developer_name || null,
+    company_name: profile.company_name || local?.company_name || null,
+    is_developer: profile.is_developer || local?.is_developer || false,
+    avatar_url: profile.avatar_url || localAvatar || null,
   };
 }
 function isDeveloperAccount(profile) {
@@ -1789,8 +1825,28 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 }
 
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, dark }) {
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarErr, setAvatarErr] = useState('');
+  const avatarUrl = profile?.avatar_url || (profile?.id ? getLocalAvatar(profile.id) : null);
+
+  const onPickAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !session || !profile?.id) return;
+    setAvatarBusy(true);
+    setAvatarErr('');
+    try {
+      const url = await uploadProfileAvatar(file, profile.id, session);
+      const next = { ...profile, avatar_url: url };
+      onProfileUpdated?.(next);
+    } catch (err) {
+      setAvatarErr(err.message || 'Could not upload avatar');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
   const [showSupport, setShowSupport] = useState(false);
   const bg = dark ? 'bg-transparent' : 'bg-transparent';
   const text = dark ? 'text-white' : 'text-gray-900';
@@ -1819,12 +1875,24 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
     <div className={`${bg} max-w-2xl mx-auto space-y-5 pb-8`}>
       {/* Account header */}
       <div className={`rounded-2xl border p-5 flex items-center gap-4 ${card}`}>
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl flex-shrink-0">
-          {(profile.email || '?').charAt(0).toUpperCase()}
+        <div className="relative flex-shrink-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl overflow-hidden">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              (profile.email || '?').charAt(0).toUpperCase()
+            )}
+          </div>
+          <label className={`absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer shadow-md ${dark ? 'bg-white text-gray-800' : 'bg-violet-600 text-white'}`} title="Upload avatar">
+            {avatarBusy ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+            <input type="file" accept="image/*" className="hidden" disabled={avatarBusy} onChange={onPickAvatar} />
+          </label>
         </div>
         <div className="min-w-0 flex-1">
           <p className={`font-extrabold text-[16px] ${text} truncate`}>{publicDevName(profile) || profile.email?.split('@')[0] || 'User'}</p>
           <p className={`text-[13px] ${subtext} truncate`}>{profile.email}</p>
+          {avatarErr && <p className="text-[11px] text-red-500 mt-0.5">{avatarErr}</p>}
+          <p className={`text-[11px] mt-0.5 ${subtext}`}>{avatarBusy ? 'Uploading photo…' : 'Tap the pencil to change your photo'}</p>
           {isDeveloperAccount(profile) && (
             <p className={`text-[11.5px] mt-0.5 font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>Developer · {publicDevName(profile)}</p>
           )}
@@ -2920,18 +2988,41 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
   const maxDist = Math.max(1, ...distribution);
   const myExistingReview = profile ? reviews.find(r => r.user_id === profile.id) : null;
 
+  // Prefill form when user already has a review (edit mode)
+  useEffect(() => {
+    if (myExistingReview) {
+      setMyRating(myExistingReview.rating || 0);
+      setMyReviewText(myExistingReview.review_text || '');
+    }
+  }, [myExistingReview?.id, myExistingReview?.rating, myExistingReview?.review_text]);
+
   const handleSubmitReview = async () => {
+    if (!session || !profile) { onOpenAuth?.(); return; }
     if (!myRating) { setReviewError('Pick a star rating first.'); return; }
     setSubmittingReview(true);
     setReviewError('');
     try {
-      await sbInsert('app_reviews', { app_id: app.id, user_id: profile.id, rating: myRating, review_text: myReviewText.trim() || null }, session);
+      if (myExistingReview?.id) {
+        await sbUpdate(
+          'app_reviews',
+          { rating: myRating, review_text: myReviewText.trim() || null },
+          { id: myExistingReview.id },
+          session
+        );
+        showToast?.('Review updated', 'success');
+      } else {
+        await sbInsert(
+          'app_reviews',
+          { app_id: app.id, user_id: profile.id, rating: myRating, review_text: myReviewText.trim() || null },
+          session
+        );
+        showToast?.('Review posted', 'success');
+      }
       const rv = await sbSelect('app_reviews', `app_id=eq.${app.id}&order=created_at.desc`);
       setReviews(rv || []);
-      setMyRating(0);
-      setMyReviewText('');
     } catch (e) {
-      setReviewError(e.message.toLowerCase().includes('duplicate') ? "You've already reviewed this app." : e.message);
+      const msg = (e.message || '').toLowerCase();
+      setReviewError(msg.includes('duplicate') ? "You've already reviewed this app — edit your existing review." : e.message);
     } finally {
       setSubmittingReview(false);
     }
@@ -3112,15 +3203,15 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
             </div>
           </div>
 
-          {session && profile && !myExistingReview && (
+          {session && profile && (
             <div className={`rounded-2xl p-4 mb-5 ${card}`}>
-              <p className={`font-semibold text-[13.5px] ${text} mb-2.5`}>Rate this app</p>
+              <p className={`font-semibold text-[13.5px] ${text} mb-2.5`}>{myExistingReview ? 'Edit your review' : 'Rate this app'}</p>
               <div className="mb-3"><StarPicker value={myRating} onChange={setMyRating} /></div>
               <textarea value={myReviewText} onChange={(e) => setMyReviewText(e.target.value)} placeholder="Share your thoughts (optional)"
                 className={`w-full px-3 py-2 rounded-xl text-[13px] h-16 resize-none mb-2.5 focus:outline-none ${dark ? 'bg-white/10 text-white placeholder-slate-500' : 'bg-white border border-gray-200 text-gray-800'}`} />
               {reviewError && <p className="text-red-500 text-[12px] mb-2">{reviewError}</p>}
               <button onClick={handleSubmitReview} disabled={submittingReview} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-4 py-2 rounded-xl font-semibold text-[13px] disabled:opacity-50">
-                {submittingReview ? 'Posting…' : 'Post review'}
+                {submittingReview ? (myExistingReview ? 'Saving…' : 'Posting…') : (myExistingReview ? 'Save changes' : 'Post review')}
               </button>
             </div>
           )}
@@ -3395,7 +3486,7 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated }) {
   const dark = false;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -3577,6 +3668,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
               <div>
                 <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Profile</h2>
                 <ProfileView
+                  onProfileUpdated={onProfileUpdated}
                   session={session}
                   profile={profile}
                   wallet={wallet}
@@ -3661,7 +3753,7 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated }) {
   const dark = false;
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -3897,6 +3989,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
           </button>
           <h2 className="text-[16px] font-extrabold text-white mb-4">Profile</h2>
           <ProfileView
+                  onProfileUpdated={onProfileUpdated}
             session={session}
             profile={profile}
             wallet={wallet}
@@ -4162,6 +4255,7 @@ export default function NexaStore() {
       showToast('Wallet disconnected', 'info');
     },
     onOpenTutorials: openTutorialHub,
+    onProfileUpdated: setProfile,
     onOpenTutorial: openTutorialById,
   };
   void ownedTick;
