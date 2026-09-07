@@ -63,6 +63,33 @@ async function completeNexaPulseLogin(code) {
 
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
 
+const WALLET_STORAGE_KEY = 'nexastore_connected_wallet';
+
+function getStoredWallet() {
+  try {
+    const raw = localStorage.getItem(WALLET_STORAGE_KEY);
+    if (!raw) return null;
+    const w = JSON.parse(raw);
+    if (!w || typeof w !== 'object') return null;
+    if (!w.address) return null;
+    return w;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredWallet(wallet) {
+  try {
+    if (!wallet) {
+      localStorage.removeItem(WALLET_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify(wallet));
+  } catch {}
+}
+
+
+
 // --- Affiliate / promo codes (pay per confirmed purchase) ---
 const AFF_LOCAL_KEY = 'nexastore_affiliates_v1';
 const AFF_ATTRIB_KEY = 'nexastore_affiliate_attributions_v1';
