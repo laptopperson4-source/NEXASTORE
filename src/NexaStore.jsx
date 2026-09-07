@@ -368,6 +368,24 @@ async function generateAffiliateCodeForUser(profile, session, app) {
   return row;
 }
 
+
+function NexaLogo({ size = 36, className = '' }) {
+  return (
+    <img
+      src="/nexastore-icon.png"
+      alt="NexaStore"
+      width={size}
+      height={size}
+      className={`rounded-xl object-cover flex-shrink-0 ${className}`}
+      style={{ width: size, height: size }}
+      onError={(e) => {
+        e.currentTarget.onerror = null;
+        e.currentTarget.src = '/nexastorelogo.png';
+      }}
+    />
+  );
+}
+
 function formatPrice(price) {
   const p = parseFloat(price) || 0;
   if (p <= 0) return 'Free';
