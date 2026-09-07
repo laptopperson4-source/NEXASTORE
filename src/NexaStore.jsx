@@ -125,7 +125,25 @@ function rememberPromo(code) {
 function findAffiliateByCode(code) {
   const c = String(code || '').trim().toUpperCase();
   if (!c) return null;
-  return loadLocalAffiliates().find((a) => a.code === c && a.status !== 'disabled') || null;
+  return loadLocalAffiliates().find((a) => a.code === c && a.status === 'active') || null;
+}
+
+function setAffiliateStatusLocal(userId, status) {
+  const list = loadLocalAffiliates().map((a) => (a.userId === userId ? { ...a, status } : a));
+  saveLocalAffiliates(list);
+  return list;
+}
+
+function affiliateEarningsByDay(code) {
+  const sales = loadAttributions().filter((r) => r.code === code);
+  const byDay = {};
+  for (const r of sales) {
+    const day = (r.createdAt || '').slice(0, 10) || 'unknown';
+    if (!byDay[day]) byDay[day] = { day, credit: 0, sales: 0 };
+    byDay[day].credit += parseFloat(r.creditUsdt) || 0;
+    byDay[day].sales += 1;
+  }
+  return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
 }
 
 function recordAffiliateSale({ code, appId, appName, amountUsdt, buyerId }) {
@@ -186,7 +204,7 @@ async function ensureAffiliateForUser(profile, session) {
     email: profile.email || '',
     code,
     wallet: profile.payout_wallet || '',
-    status: 'active',
+    status: 'pending', // admin must approve before codes earn
     createdAt: new Date().toISOString(),
   };
   local.push(mine);
@@ -200,7 +218,7 @@ async function ensureAffiliateForUser(profile, session) {
           email: profile.email || null,
           code: mine.code,
           payout_wallet: mine.wallet || null,
-          status: 'active',
+          status: 'pending',
         },
         session
       );
@@ -2216,13 +2234,22 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
   const sales = useMemo(() => {
     if (!aff?.code) return [];
     return loadAttributions().filter((r) => r.code === aff.code);
-  }, [aff?.code, aff]);
+  }, [aff?.code]);
 
+  const chart = useMemo(() => (aff?.code ? affiliateEarningsByDay(aff.code) : []), [aff?.code, sales.length]);
   const totalCredit = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
-  const pending = sales.filter((r) => r.status === 'pending_payout');
-  const link = typeof window !== 'undefined'
+  const pendingPay = sales.filter((r) => r.status === 'pending_payout');
+  const status = aff?.status || 'pending';
+
+  const linkHome = typeof window !== 'undefined'
     ? `${window.location.origin}/?promo=${encodeURIComponent(aff?.code || '')}`
     : `https://nexastore-baj.pages.dev/?promo=${aff?.code || ''}`;
+  const linkHiNote = typeof window !== 'undefined'
+    ? `${window.location.origin}/app/hi-note/?promo=${encodeURIComponent(aff?.code || '')}`
+    : `https://nexastore-baj.pages.dev/app/hi-note/?promo=${aff?.code || ''}`;
+  const linkAff = typeof window !== 'undefined'
+    ? `${window.location.origin}/affiliates/`
+    : 'https://nexastore-baj.pages.dev/affiliates/';
 
   const saveWallet = async () => {
     if (!aff) return;
@@ -2247,18 +2274,25 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
   const copy = async (val) => {
     try {
       await navigator.clipboard.writeText(val);
-      setCopied(true);
+      setCopied(val);
       setTimeout(() => setCopied(false), 1500);
     } catch {}
   };
+
+  const statusLabel = {
+    pending: 'Pending approval',
+    active: 'Active',
+    rejected: 'Rejected',
+    blocked: 'Blocked',
+  }[status] || status;
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className={`w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border p-5 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <p className={`font-extrabold text-[17px] ${text}`}>Affiliate dashboard</p>
-            <p className={`text-[12px] ${subtext}`}>Promo code · pay per confirmed sale only</p>
+            <p className={`font-extrabold text-[17px] ${text}`}>Your affiliate dashboard</p>
+            <p className={`text-[12px] ${subtext}`}>Codes, links, and earnings over time</p>
           </div>
           <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
             <X size={18} className={text} />
@@ -2266,28 +2300,83 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
         </div>
 
         {!aff ? (
-          <p className={`text-[13px] ${subtext}`}>Setting up your code…</p>
+          <p className={`text-[13px] ${subtext}`}>Loading…</p>
         ) : (
           <div className="space-y-4">
             <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Your promo code</p>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Status</p>
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                  status === 'active' ? 'bg-emerald-500/15 text-emerald-600' :
+                  status === 'pending' ? 'bg-amber-500/15 text-amber-700' :
+                  'bg-red-500/15 text-red-600'
+                }`}>{statusLabel}</span>
+              </div>
+              {status === 'pending' && (
+                <p className={`text-[12.5px] mt-2 ${subtext}`}>Your application is waiting for admin approval. You can still copy links; earnings only count after you are <b>Active</b>.</p>
+              )}
+              {status === 'rejected' && (
+                <p className={`text-[12.5px] mt-2 text-red-500`}>Your application was rejected. Contact support if you think this is a mistake.</p>
+              )}
+              {status === 'blocked' && (
+                <p className={`text-[12.5px] mt-2 text-red-500`}>This affiliate account is blocked. Promo codes will not earn credit.</p>
+              )}
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Promo code</p>
               <p className={`text-[28px] font-black tracking-widest mt-1 ${text}`}>{aff.code}</p>
-              <p className={`text-[12px] mt-2 ${subtext}`}>Share link:</p>
-              <p className={`text-[12px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{link}</p>
-              <button type="button" onClick={() => copy(link)} className="mt-2 text-[12px] font-semibold text-violet-600">
-                {copied ? 'Copied' : 'Copy link'}
+              <button type="button" onClick={() => copy(aff.code)} className="text-[12px] font-semibold text-violet-600 mt-1">
+                {copied === aff.code ? 'Copied' : 'Copy code'}
               </button>
+            </div>
+
+            <div className={`rounded-2xl border p-4 space-y-3 ${card}`}>
+              <p className={`font-bold text-[13px] ${text}`}>Copyable links</p>
+              {[
+                ['Store home', linkHome],
+                ['Hi-Note page', linkHiNote],
+                ['Program rules', linkAff],
+              ].map(([label, url]) => (
+                <div key={label} className={`rounded-xl p-2.5 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
+                  <p className={`text-[11px] font-semibold ${subtext}`}>{label}</p>
+                  <p className={`text-[11px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{url}</p>
+                  <button type="button" onClick={() => copy(url)} className="text-[11px] font-bold text-violet-600 mt-1">
+                    {copied === url ? 'Copied' : 'Copy link'}
+                  </button>
+                </div>
+              ))}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <div className={`rounded-2xl border p-3 ${card}`}>
-                <p className={`text-[11px] ${subtext}`}>Attributed sales</p>
+                <p className={`text-[11px] ${subtext}`}>Sales attributed</p>
                 <p className={`text-[20px] font-extrabold ${text}`}>{sales.length}</p>
               </div>
               <div className={`rounded-2xl border p-3 ${card}`}>
-                <p className={`text-[11px] ${subtext}`}>Credit (10%)</p>
+                <p className={`text-[11px] ${subtext}`}>Total credit (10%)</p>
                 <p className={`text-[20px] font-extrabold text-emerald-500`}>{totalCredit.toFixed(2)} USDT</p>
               </div>
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`font-bold text-[13px] mb-2 ${text}`}>Earnings over time</p>
+              {chart.length === 0 ? (
+                <p className={`text-[12px] ${subtext} py-6 text-center`}>No attributed sales yet.</p>
+              ) : (
+                <div className="h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chart}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                      <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Credit']} />
+                      <Bar dataKey="credit" fill="#10b981" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <p className={`text-[11px] mt-2 ${subtext}`}>{pendingPay.length} sale(s) pending payout. Admin pays on schedule after review.</p>
             </div>
 
             <div className={`rounded-2xl border p-4 space-y-2 ${card}`}>
@@ -2301,28 +2390,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
               <button type="button" disabled={busy} onClick={saveWallet} className="w-full py-2.5 rounded-xl font-bold text-[13px] text-white bg-emerald-600 disabled:opacity-50">
                 {busy ? 'Saving…' : 'Save wallet'}
               </button>
-              <p className={`text-[11px] ${subtext}`}>{pending.length} sale(s) pending payout review. Paid manually on a schedule while the program is early.</p>
             </div>
-
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`font-bold text-[13px] mb-2 ${text}`}>Recent attributions</p>
-              {sales.length === 0 ? (
-                <p className={`text-[12px] ${subtext}`}>None yet. Share your code on X; buyers enter it at checkout or use your link.</p>
-              ) : (
-                <ul className="space-y-2 max-h-40 overflow-y-auto">
-                  {sales.slice().reverse().slice(0, 20).map((r) => (
-                    <li key={r.id} className={`text-[12px] flex justify-between gap-2 ${subtext}`}>
-                      <span className="truncate">{r.appName || 'App'} · {r.amountUsdt} USDT</span>
-                      <span className="text-emerald-500 font-semibold shrink-0">+{r.creditUsdt}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <a href="/affiliates/" target="_blank" rel="noopener noreferrer" className={`block text-center text-[12px] font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>
-              Program rules →
-            </a>
           </div>
         )}
       </div>
@@ -3262,6 +3330,66 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [visitRange, setVisitRange] = useState('7d'); // 24h | 7d | 30d | all
   const [visitStats, setVisitStats] = useState({ totalVisits: 0, uniqueVisitors: 0, chart: [], ok: true });
+  const [affiliatesList, setAffiliatesList] = useState([]);
+  const [affBusyId, setAffBusyId] = useState(null);
+
+  const loadAffiliates = async () => {
+    let remote = [];
+    try {
+      remote = await sbSelect('affiliates', 'select=*&order=created_at.desc', session);
+    } catch {
+      remote = [];
+    }
+    const local = loadLocalAffiliates();
+    // Merge by userId / code (remote wins on status when present)
+    const byKey = {};
+    for (const a of local) {
+      byKey[a.userId || a.code] = { ...a };
+    }
+    for (const r of remote || []) {
+      const key = r.user_id || r.code;
+      byKey[key] = {
+        userId: r.user_id,
+        email: r.email,
+        code: r.code,
+        wallet: r.payout_wallet || '',
+        status: r.status || 'pending',
+        createdAt: r.created_at,
+      };
+    }
+    const merged = Object.values(byKey);
+    setAffiliatesList(merged);
+    saveLocalAffiliates(merged.map((a) => ({
+      userId: a.userId,
+      email: a.email,
+      code: a.code,
+      wallet: a.wallet,
+      status: a.status,
+      createdAt: a.createdAt,
+    })));
+  };
+
+  const setAffStatus = async (aff, status) => {
+    const idKey = aff.userId || aff.code;
+    setAffBusyId(idKey);
+    try {
+      if (aff.userId && session) {
+        await sbUpdate('affiliates', { status }, { user_id: aff.userId }, session).catch(() => {});
+      }
+      setAffiliateStatusLocal(aff.userId, status);
+      // also update by code if no userId match
+      const list = loadLocalAffiliates().map((a) =>
+        (aff.userId && a.userId === aff.userId) || a.code === aff.code ? { ...a, status } : a
+      );
+      saveLocalAffiliates(list);
+      await loadAffiliates();
+      showToast?.(`Affiliate ${aff.code} → ${status}`, status === 'active' ? 'success' : 'info');
+    } catch (e) {
+      showToast?.(e.message || 'Update failed', 'error');
+    } finally {
+      setAffBusyId(null);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -3279,6 +3407,9 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
     try {
       const stats = await fetchVisitStats(session, visitRange);
       setVisitStats(stats);
+    } catch {}
+    try {
+      await loadAffiliates();
     } catch {}
     setLoading(false);
   };
@@ -3370,7 +3501,59 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
           </div>
         </div>
 
-        {/* Store visitors */}
+        
+        {/* Affiliates — admin only */}
+        <div className={`rounded-2xl border p-4 mb-8 ${border} ${card}`}>
+          <p className={`font-bold text-[14px] ${text} mb-1`}>Affiliates</p>
+          <p className={`text-[11.5px] ${subtext} mb-3`}>Signups, earnings credits, approve / reject / block. Only active codes earn at checkout.</p>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
+              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Pending</p>
+              <p className="text-lg font-extrabold text-amber-500">{affiliatesList.filter(a => a.status === 'pending').length}</p>
+            </div>
+            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
+              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Active</p>
+              <p className="text-lg font-extrabold text-emerald-500">{affiliatesList.filter(a => a.status === 'active').length}</p>
+            </div>
+            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
+              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Blocked</p>
+              <p className="text-lg font-extrabold text-red-500">{affiliatesList.filter(a => a.status === 'blocked' || a.status === 'rejected').length}</p>
+            </div>
+          </div>
+          {affiliatesList.length === 0 ? (
+            <p className={`text-[13px] ${subtext}`}>No affiliate signups yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {affiliatesList.map((a) => {
+                const sales = loadAttributions().filter((r) => r.code === a.code);
+                const earned = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
+                const busy = affBusyId === (a.userId || a.code);
+                return (
+                  <div key={a.code || a.userId} className={`rounded-xl border p-3 ${dark ? 'border-white/10 bg-black/20' : 'border-gray-200 bg-white'}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className={`font-bold text-[13px] ${text}`}>{a.code} <span className={`text-[11px] font-semibold ${subtext}`}>· {a.status}</span></p>
+                        <p className={`text-[11px] ${subtext} truncate`}>{a.email || a.userId || '—'}</p>
+                        <p className={`text-[12px] mt-1 ${text}`}>{sales.length} sales · <span className="text-emerald-500 font-bold">{earned.toFixed(2)} USDT</span> credit</p>
+                        {a.wallet && <p className={`text-[10px] font-mono truncate ${subtext}`}>{a.wallet}</p>}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button type="button" disabled={busy || a.status === 'active'} onClick={() => setAffStatus(a, 'active')}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40">Accept</button>
+                        <button type="button" disabled={busy} onClick={() => setAffStatus(a, 'rejected')}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white disabled:opacity-40">Reject</button>
+                        <button type="button" disabled={busy} onClick={() => setAffStatus(a, 'blocked')}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-600 text-white disabled:opacity-40">Block</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+{/* Store visitors */}
         <div className={`rounded-2xl border p-4 mb-8 ${border} ${card}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
