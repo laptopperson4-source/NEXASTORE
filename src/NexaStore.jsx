@@ -2219,6 +2219,24 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
             <ChevronRight size={17} className={subtext} />
           </button>
         )}
+        <div className={`rounded-2xl border p-4 ${card}`}>
+          <p className={`text-[12px] font-bold uppercase tracking-wider mb-2 ${subtext}`}>Trust &amp; policies</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ['About', '/about/'],
+              ['Payments', '/payments/'],
+              ['Terms', '/terms/'],
+              ['Privacy', '/privacy/'],
+              ['Contact', '/contact/'],
+            ].map(([label, href]) => (
+              <a key={href} href={href} target="_blank" rel="noopener noreferrer"
+                className={`text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-white/10 text-slate-200' : 'bg-white border border-gray-200 text-gray-700'}`}>
+                {label}
+              </a>
+            ))}
+          </div>
+        </div>
+
         <button onClick={onSignOut}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${dark ? 'border-red-500/30 bg-red-500/10' : 'border-red-100 bg-red-50'} hover:opacity-90`}>
           <span className="flex items-center gap-3 font-semibold text-[14px] text-red-500">

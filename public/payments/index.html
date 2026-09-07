@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>How payments work · NexaStore</title>
+<meta name="description" content="How NexaStore USDT payments on Polygon work, who receives funds, and risks."/>
+<link rel="canonical" href="https://nexastore-baj.pages.dev/payments/"/>
+<style>
+  body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
+  a{color:#6d28d9} .wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:1.75rem;margin:0 0 8px} h2{font-size:1.15rem;margin:28px 0 8px}
+  .muted{color:#64748b;font-size:0.95rem} .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin:16px 0}
+  nav a{margin-right:14px;font-size:0.9rem;font-weight:600;text-decoration:none;color:#475569}
+  nav a:hover{color:#6d28d9} .badge{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:0.75rem;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:12px}
+</style>
+</head><body><div class="wrap">
+<nav>
+  <a href="/">NexaStore</a>
+  <a href="/about/">About</a>
+  <a href="/payments/">Payments</a>
+  <a href="/terms/">Terms</a>
+  <a href="/privacy/">Privacy</a>
+  <a href="/contact/">Contact</a>
+</nav>
+<p class="badge">Payment mechanics</p>
+<h1>How payments work</h1>
+<p class="muted">Last updated: 7 September 2026 · Read before sending any crypto</p>
+<div class="card">
+<h2 style="margin-top:0">Network</h2>
+<p>Paid apps are priced in <strong>USDT on Polygon</strong> (chain ID <strong>137</strong>). USDT on other networks (Ethereum, BSC, TRC-20, etc.) is <strong>not</strong> accepted for NexaStore unlocks and can be lost if sent to the wrong network.</p>
+</div>
+<div class="card">
+<h2 style="margin-top:0">Who receives the money</h2>
+<p>In the default flow, the buyer sends USDT to the <strong>developer payout wallet</strong> shown for that app (Polygon address). NexaStore’s stated model is <strong>direct to developer</strong> with <strong>no platform commission</strong> on that transfer.</p>
+<p>If a developer has not set a payout wallet, a platform fallback address may be used so checkout can still complete. We document that clearly in the product when it applies.</p>
+<p>On-chain transfers are final. There is no card-style chargeback.</p>
+</div>
+<div class="card">
+<h2 style="margin-top:0">Fees</h2>
+<p>You need enough Polygon USDT for the app price and a small amount of <strong>POL</strong> for network gas. Gas is paid to the network, not to NexaStore as a commission.</p>
+</div>
+<div class="card">
+<h2 style="margin-top:0">Risks (honest)</h2>
+<ul>
+<li>Send only the listed amount on Polygon to the address shown in checkout.</li>
+<li>Wrong network or wrong address usually cannot be reversed.</li>
+<li>The marketplace is early; treat small test amounts as the safe way to learn the flow.</li>
+</ul>
+</div>
+<p class="muted"><a href="/">← Back to NexaStore</a></p>
+</div></body></html>
