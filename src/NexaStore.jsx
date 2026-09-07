@@ -9,6 +9,538 @@ const STORAGEAPI = `${SUPABASE_URL}/storage/v1`;
 const AUTHAPI = `${SUPABASE_URL}/auth/v1`;
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY";
 
+async function sbSelect(table, qs, token) {
+  const url = `${REST}/${table}?${qs}`;
+  const opts = { headers: { "apikey": ANON_KEY } };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function sbDownload(bucket, path, token, onProgress) {
+  const url = `${STORAGEAPI}/object/${bucket}/${path}`;
+  const opts = { headers: { "apikey": ANON_KEY } };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+
+  let r;
+  try {
+    r = await fetch(url, opts);
+  } catch {
+    throw new Error("Couldn't reach the server — check your connection and try again.");
+  }
+  if (!r.ok) {
+    throw new Error(r.status === 404 ? "This app's file isn't available yet." : `Download failed (server said ${r.status}).`);
+  }
+
+  const total = parseInt(r.headers.get('Content-Length') || '0', 10);
+  if (!r.body || !total) {
+    const blob = await r.blob();
+    onProgress?.(1);
+    return blob;
+  }
+
+  const reader = r.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    let step;
+    try {
+      step = await reader.read();
+    } catch {
+      throw new Error("Connection dropped partway through — please try again.");
+    }
+    if (step.done) break;
+    chunks.push(step.value);
+    received += step.value.length;
+    onProgress?.(received / total);
+  }
+  return new Blob(chunks);
+}
+
+function sanitizeFilename(name) {
+  return (name || 'app').trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'app';
+}
+
+function buildDownloadFilename(app) {
+  const rawExt = (app.file_name || '').split('.').pop();
+  const looksLikeExt = rawExt && rawExt.length <= 5 && /^[a-z0-9]+$/i.test(rawExt);
+  const ext = looksLikeExt ? rawExt.toLowerCase() : ((app.file_type || '').includes('android') ? 'apk' : 'zip');
+  return `${sanitizeFilename(app.name)}.${ext}`;
+}
+
+async function sbGetProfile(token) {
+  const r = await fetch(`${AUTHAPI}/user`, {
+    headers: { "apikey": ANON_KEY, "authorization": `Bearer ${token}` }
+  });
+  if (!r.ok) return null;
+  return r.json();
+}
+
+async function sbInsert(table, data, token) {
+  const opts = {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json", "Prefer": "return=representation" }
+  };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const r = await fetch(`${REST}/${table}`, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function sbDelete(table, match, token) {
+  const qs = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
+  const opts = { method: "DELETE", headers: { "apikey": ANON_KEY } };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const r = await fetch(`${REST}/${table}?${qs}`, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return true;
+}
+
+async function sbUpdate(table, data, match, token) {
+  const qs = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
+  const opts = {
+    method: "PATCH",
+    body: JSON.stringify(data),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
+  };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const r = await fetch(`${REST}/${table}?${qs}`, opts);
+  if (!r.ok) throw new Error(await r.text());
+  const text = await r.text();
+  return text ? JSON.parse(text) : true;
+}
+async function sbUpload(bucket, path, file, token) {
+  const url = `${STORAGEAPI}/object/${bucket}/${path}`;
+  const opts = { method: "POST", body: file, headers: { "apikey": ANON_KEY, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" } };
+  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function sbSignUp(email, password) {
+  const r = await fetch(`${AUTHAPI}/signup`, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Sign up failed');
+  }
+  return r.json();
+}
+
+async function sbSignIn(email, password) {
+  const r = await fetch(`${AUTHAPI}/token?grant_type=password`, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Sign in failed');
+  }
+  return r.json();
+}
+
+async function sbResetPassword(email) {
+  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://nexastore-baj.pages.dev/';
+  const r = await fetch(`${AUTHAPI}/recover`, {
+    method: 'POST',
+    body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
+    headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
+  });
+  // Supabase often returns 200 even if email unknown (anti-enumeration)
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Could not send reset email');
+  }
+  return true;
+}
+
+async function sbUpdatePassword(accessToken, newPassword) {
+  const r = await fetch(`${AUTHAPI}/user`, {
+    method: 'PUT',
+    body: JSON.stringify({ password: newPassword }),
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error_description || err.msg || err.error || 'Could not update password');
+  }
+  return r.json();
+}
+
+async function sbRefresh(refreshToken) {
+  const r = await fetch(`${AUTHAPI}/token?grant_type=refresh_token`, {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
+  });
+  if (!r.ok) return null;
+  return r.json();
+}
+
+const AUTH_STORAGE_KEY = 'nexastore_auth';
+function saveAuthSession(data) {
+  // data: { access_token, refresh_token, expires_at?, expires_in? }
+  if (!data?.access_token) return;
+  const expiresAt = data.expires_at
+    || (data.expires_in ? Math.floor(Date.now() / 1000) + Number(data.expires_in) : null);
+  const payload = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || null,
+    expires_at: expiresAt,
+  };
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem('token', data.access_token); // backward compat
+  } catch {}
+}
+function loadAuthSession() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  const token = localStorage.getItem('token');
+  return token ? { access_token: token, refresh_token: null, expires_at: null } : null;
+}
+function clearAuthSession() {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem('token');
+  } catch {}
+}
+async function restoreSession() {
+  const saved = loadAuthSession();
+  if (!saved?.access_token) return null;
+  // Try current access token
+  let user = await sbGetProfile(saved.access_token);
+  if (user) return { token: saved.access_token, user, session: saved };
+  // Refresh if possible
+  if (saved.refresh_token) {
+    const refreshed = await sbRefresh(saved.refresh_token);
+    if (refreshed?.access_token) {
+      saveAuthSession(refreshed);
+      user = await sbGetProfile(refreshed.access_token);
+      if (user) return { token: refreshed.access_token, user, session: refreshed };
+    }
+  }
+  clearAuthSession();
+  return null;
+}
+
+
+/* ============================================
+   SHARED: Logo, banners, icon maps, themes
+   ============================================ */
+/* ============================================
+   USDT PAYMENTS + CRYPTO WALLET (client-side)
+   Prices are in USDT. Purchases are tracked in
+   localStorage (and best-effort to a purchases
+   table if it exists on Supabase).
+   ============================================ */
+const WALLET_KEY = 'nexastore_crypto_wallet';
+
+const PURCHASES_KEY = 'nexastore_purchases';
+
+const RECOMMENDED_WALLETS = [
+  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Polygon USDT on NexaStore', url: 'https://metamask.io/', networks: 'Polygon, Ethereum, L2s', tutorialId: 'metamask-eth-ext', recommended: true },
+  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first multi-chain wallet', url: 'https://trustwallet.com/', networks: 'Multi-chain', tutorialId: 'trust-btc-mob', recommended: false },
+  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, multi-chain USDT', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain', tutorialId: 'coinbase-eth-mob', recommended: false },
+  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Web3 wallet linked to Binance', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi', tutorialId: null, recommended: false },
+  { id: 'phantom', name: 'Phantom', desc: 'Great UX; mainly Solana (use MetaMask for Polygon)', url: 'https://phantom.app/', networks: 'Solana + more', tutorialId: 'phantom-sol-ext', recommended: false },
+  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — not used for NexaStore payments', url: 'https://tonkeeper.com/', networks: 'TON', tutorialId: null, recommended: false },
+];
+
+/** Wallet-specific warnings for Polygon USDT checkout */
+function walletCheckoutWarnings(wallet) {
+  const id = (wallet?.provider || wallet?.id || '').toLowerCase();
+  const name = (wallet?.name || '').toLowerCase();
+  if (id.includes('metamask') || name.includes('metamask')) {
+    return [
+      'In MetaMask, open the network menu and select Polygon Mainnet (chain 137).',
+      'Buy or bridge USDT on Polygon — USDT on Ethereum/BSC will not work for this payment.',
+      'Keep a little POL in the same account for gas fees.',
+      'When you pay, confirm the popup in this browser — do not switch networks mid-payment.',
+    ];
+  }
+  if (id.includes('trust') || name.includes('trust')) {
+    return [
+      'In Trust Wallet, set the network to Polygon before buying or sending USDT.',
+      'Only send Polygon USDT. TRC-20 / ERC-20 USDT sent to our address will be lost.',
+      'After buying USDT, return here and use Pay in browser wallet (or copy the deposit address).',
+    ];
+  }
+  if (id.includes('coinbase') || name.includes('coinbase')) {
+    return [
+      'Switch Coinbase Wallet network to Polygon Mainnet.',
+      'Buy USDT on Polygon (not Base/Ethereum) for this store.',
+      'Return here and confirm the in-browser payment request.',
+    ];
+  }
+  if (id.includes('phantom') || name.includes('phantom')) {
+    return [
+      'Phantom is mainly Solana. For NexaStore you need a Polygon-capable wallet (MetaMask recommended).',
+      'If Phantom shows Polygon, still double-check you are sending Polygon USDT only.',
+    ];
+  }
+  return [
+    'Set your wallet network to Polygon Mainnet before buying or sending.',
+    'Only Polygon USDT is accepted. Other networks = lost funds.',
+    'Buy at least the listed USDT amount, plus a little native gas token (POL).',
+    'Come back to NexaStore and tap Continue to Payment / Pay in browser wallet.',
+  ];
+}
+
+
+let _tutorialsCache = null;
+async function loadTutorials() {
+  if (_tutorialsCache) return _tutorialsCache;
+  try {
+    const r = await fetch('/tutorials.json');
+    if (!r.ok) throw new Error('failed');
+    _tutorialsCache = await r.json();
+  } catch {
+    _tutorialsCache = [];
+  }
+  return _tutorialsCache;
+}
+function findTutorial(tutorials, tutorialId, walletName) {
+  if (!tutorials?.length) return null;
+  if (tutorialId) {
+    const hit = tutorials.find(t => t.id === tutorialId);
+    if (hit) return hit;
+  }
+  if (walletName) {
+    const q = walletName.toLowerCase();
+    return tutorials.find(t => (t.walletName || '').toLowerCase().includes(q) || q.includes((t.walletName || '').toLowerCase())) || null;
+  }
+  return null;
+}
+
+
+function getStoredWallet() {
+  try { return JSON.parse(localStorage.getItem(WALLET_KEY) || 'null'); } catch { return null; }
+}
+function setStoredWallet(w) {
+  if (w) localStorage.setItem(WALLET_KEY, JSON.stringify(w));
+  else localStorage.removeItem(WALLET_KEY);
+}
+function getPurchases() {
+  try { return JSON.parse(localStorage.getItem(PURCHASES_KEY) || '{}'); } catch { return {}; }
+}
+function markPurchased(appId, userId) {
+  const key = userId || 'guest';
+  const all = getPurchases();
+  if (!all[key]) all[key] = [];
+  if (!all[key].includes(appId)) all[key].push(appId);
+  localStorage.setItem(PURCHASES_KEY, JSON.stringify(all));
+}
+function hasPurchased(appId, userId) {
+  const key = userId || 'guest';
+  const all = getPurchases();
+  return (all[key] || []).includes(appId);
+}
+
+async function resolvePayoutWallet(app) {
+  try {
+    if (app?.dev_id) {
+      const rows = await sbSelect('profiles', `id=eq.${app.dev_id}&select=payout_wallet,email`);
+      const w = rows?.[0]?.payout_wallet;
+      if (w && String(w).length >= 10) return { address: String(w), source: 'developer' };
+    }
+  } catch {}
+  try {
+    const local = localStorage.getItem(`nexastore_payout_${app?.dev_id || ''}`);
+    if (local && local.length >= 10) return { address: local, source: 'developer' };
+  } catch {}
+  return { address: PLATFORM_TREASURY_WALLET, source: 'platform_fallback' };
+}
+
+
+function getVisitorId() {
+  try {
+    let id = localStorage.getItem('nexastore_vid');
+    if (!id) {
+      id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('nexastore_vid', id);
+    }
+    return id;
+  } catch {
+    return 'anon';
+  }
+}
+
+const LOCAL_VISITS_KEY = 'nexastore_visit_log_v1';
+
+function readLocalVisits() {
+  try {
+    const raw = localStorage.getItem(LOCAL_VISITS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendLocalVisit(entry) {
+  try {
+    const list = readLocalVisits();
+    list.push(entry);
+    // keep last 2000
+    localStorage.setItem(LOCAL_VISITS_KEY, JSON.stringify(list.slice(-2000)));
+  } catch {}
+}
+
+/** One recorded visit per browser session per calendar day. Always logs locally; tries Supabase too. */
+async function trackStoreVisit(path = '/') {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const flag = `nexastore_visit_${day}`;
+    if (sessionStorage.getItem(flag)) return;
+    sessionStorage.setItem(flag, '1');
+    const entry = {
+      path: String(path || '/').slice(0, 200),
+      visitor_id: getVisitorId(),
+      user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : null,
+      created_at: new Date().toISOString(),
+    };
+    appendLocalVisit(entry);
+    const res = await fetch(`${REST}/store_visits`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        path: entry.path,
+        visitor_id: entry.visitor_id,
+        user_agent: entry.user_agent,
+      }),
+    }).catch(() => null);
+    if (res && !res.ok) {
+      // table missing / RLS — local log still has the visit
+      console.warn('[visits] remote insert failed', res.status);
+    }
+  } catch {}
+}
+
+function aggregateVisits(list) {
+  const unique = new Set(list.map(r => r.visitor_id).filter(Boolean));
+  const byDay = {};
+  for (const r of list) {
+    const day = (r.created_at || '').slice(0, 10) || 'unknown';
+    if (!byDay[day]) byDay[day] = { day, visits: 0, visitors: new Set() };
+    byDay[day].visits += 1;
+    if (r.visitor_id) byDay[day].visitors.add(r.visitor_id);
+  }
+  const chart = Object.values(byDay)
+    .map(d => ({ day: d.day, visits: d.visits, visitors: d.visitors.size }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  return {
+    totalVisits: list.length,
+    uniqueVisitors: unique.size,
+    chart,
+  };
+}
+
+async function fetchVisitStats(session, rangeKey = '7d') {
+  const now = Date.now();
+  const ranges = {
+    '24h': now - 24 * 60 * 60 * 1000,
+    '7d': now - 7 * 24 * 60 * 60 * 1000,
+    '30d': now - 30 * 24 * 60 * 60 * 1000,
+    all: 0,
+  };
+  const sinceMs = ranges[rangeKey] ?? ranges['7d'];
+  const sinceIso = sinceMs ? new Date(sinceMs).toISOString() : null;
+
+  let remote = [];
+  let remoteOk = false;
+  let remoteError = '';
+  try {
+    let qs = 'select=id,visitor_id,path,created_at&order=created_at.desc&limit=5000';
+    if (sinceIso) qs += `&created_at=gte.${encodeURIComponent(sinceIso)}`;
+    const rows = await sbSelect('store_visits', qs, session);
+    remote = rows || [];
+    remoteOk = true;
+  } catch (e) {
+    remoteError = e.message || String(e);
+  }
+
+  let local = readLocalVisits();
+  if (sinceIso) {
+    const t0 = new Date(sinceIso).getTime();
+    local = local.filter(r => new Date(r.created_at || 0).getTime() >= t0);
+  }
+
+  // Prefer remote when available; otherwise local (this admin browser)
+  const list = remoteOk && remote.length >= 0 && !remoteError ? remote : local;
+  // If remote empty but local has data, merge unique by visitor_id+day
+  if (remoteOk && remote.length === 0 && local.length > 0) {
+    const agg = aggregateVisits(local);
+    return { ...agg, ok: true, source: 'local' };
+  }
+  if (!remoteOk) {
+    const agg = aggregateVisits(local);
+    return {
+      ...agg,
+      ok: false,
+      error: remoteError,
+      source: 'local',
+    };
+  }
+  const agg = aggregateVisits(list);
+  return { ...agg, ok: true, source: 'remote' };
+}
+
+
+async function uploadProfileAvatar(file, userId, token) {
+  if (!file || !userId || !token) throw new Error('Missing file or session');
+  if (!file.type?.startsWith('image/')) throw new Error('Please choose an image file');
+  if (file.size > 2 * 1024 * 1024) throw new Error('Image must be under 2 MB');
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const path = `${userId}/avatar.${ext}`;
+  // overwrite if exists
+  try {
+    await fetch(`${STORAGEAPI}/object/nexastore-avatars/${path}`, {
+      method: 'DELETE',
+      headers: { apikey: ANON_KEY, authorization: `Bearer ${token}` },
+    });
+  } catch {}
+  await sbUpload('nexastore-avatars', path, file, token);
+  const publicUrl = `${STORAGEAPI}/object/public/nexastore-avatars/${path}?t=${Date.now()}`;
+  try {
+    await sbUpdate('profiles', { avatar_url: publicUrl }, { id: userId }, token);
+  } catch {
+    // column may not exist — still return URL for local use
+  }
+  try {
+    localStorage.setItem(`nexastore_avatar_${userId}`, publicUrl);
+  } catch {}
+  return publicUrl;
+}
+
+function getLocalAvatar(userId) {
+  try {
+    return localStorage.getItem(`nexastore_avatar_${userId}`) || null;
+  } catch {
+    return null;
+  }
+}
+
+
+
 // --- NexaPulse SSO (PKCE, public client — no secret needed) ---
 const NEXAPULSE_URL = "https://nexapulse-auth-nexapulse.vercel.app";
 const NEXAPULSE_CLIENT_ID = "nexastore_app_id";
@@ -62,33 +594,6 @@ async function completeNexaPulseLogin(code) {
 }
 
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
-
-const WALLET_STORAGE_KEY = 'nexastore_connected_wallet';
-
-function getStoredWallet() {
-  try {
-    const raw = localStorage.getItem(WALLET_STORAGE_KEY);
-    if (!raw) return null;
-    const w = JSON.parse(raw);
-    if (!w || typeof w !== 'object') return null;
-    if (!w.address) return null;
-    return w;
-  } catch {
-    return null;
-  }
-}
-
-function setStoredWallet(wallet) {
-  try {
-    if (!wallet) {
-      localStorage.removeItem(WALLET_STORAGE_KEY);
-      return;
-    }
-    localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify(wallet));
-  } catch {}
-}
-
-
 
 // --- Affiliate / promo codes (pay per confirmed purchase) ---
 const AFF_LOCAL_KEY = 'nexastore_affiliates_v1';
