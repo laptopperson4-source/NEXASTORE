@@ -2690,7 +2690,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
   );
 }
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, onOpenAffiliate, dark }) {
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenAffiliateAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, onOpenAffiliate, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarErr, setAvatarErr] = useState('');
