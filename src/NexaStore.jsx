@@ -2694,6 +2694,10 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarErr, setAvatarErr] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameErr, setNameErr] = useState('');
   const avatarUrl = profile?.avatar_url || (profile?.id ? getLocalAvatar(profile.id) : null);
 
   const onPickAvatar = async (e) => {
@@ -2766,10 +2770,56 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
           </label>
         </div>
         <div className="min-w-0 flex-1">
-          <p className={`font-extrabold text-[16px] ${text} truncate`}>{publicDevName(profile) || profile.email?.split('@')[0] || 'User'}</p>
-          <p className={`text-[13px] ${subtext} truncate`}>{profile.email}</p>
+          {editingName ? (
+            <div className="space-y-2">
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                maxLength={48}
+                placeholder="Display name"
+                className={`w-full px-3 py-2 rounded-xl text-[14px] font-semibold ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-white border border-gray-200'}`}
+              />
+              <div className="flex gap-2">
+                <button type="button" disabled={nameBusy} onClick={async () => {
+                  const name = nameDraft.trim();
+                  if (!name) { setNameErr('Enter a name'); return; }
+                  setNameBusy(true); setNameErr('');
+                  try {
+                    setLocalDevProfile(profile.id, { ...(getLocalDevProfile(profile.id) || {}), developer_name: name });
+                    if (session) {
+                      await sbUpdate('profiles', { display_name: name }, { id: profile.id }, session).catch(() => {});
+                    }
+                    onProfileUpdated?.(mergeDevProfile({ ...profile, display_name: name, developer_name: name }));
+                    setEditingName(false);
+                  } catch (e) {
+                    setNameErr(e.message || 'Could not save name');
+                  } finally {
+                    setNameBusy(false);
+                  }
+                }} className="px-3 py-1.5 rounded-lg text-[12px] font-bold text-white bg-violet-600 disabled:opacity-50">
+                  {nameBusy ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" onClick={() => { setEditingName(false); setNameErr(''); }} className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold ${dark ? 'bg-white/10' : 'bg-gray-100'}`}>Cancel</button>
+              </div>
+              {nameErr && <p className="text-[11px] text-red-500">{nameErr}</p>}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className={`font-extrabold text-[16px] ${text} truncate`}>{publicDevName(profile) || profile.display_name || profile.email?.split('@')[0] || 'User'}</p>
+                <p className={`text-[13px] ${subtext} truncate`}>{profile.email}</p>
+              </div>
+              <button type="button" title="Edit display name" onClick={() => {
+                setNameDraft(publicDevName(profile) || profile.display_name || '');
+                setEditingName(true);
+                setNameErr('');
+              }} className={`p-1.5 rounded-lg shrink-0 ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+                <Pencil size={14} className={subtext} />
+              </button>
+            </div>
+          )}
           {avatarErr && <p className="text-[11px] text-red-500 mt-0.5">{avatarErr}</p>}
-          <p className={`text-[11px] mt-0.5 ${subtext}`}>{avatarBusy ? 'Uploading photo…' : 'Tap the pencil to change your photo'}</p>
+          <p className={`text-[11px] mt-0.5 ${subtext}`}>{avatarBusy ? 'Uploading photo…' : 'Tap the pencil on the photo to change it · name pencil edits display name'}</p>
           {isDeveloperAccount(profile) && (
             <p className={`text-[11.5px] mt-0.5 font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>Developer · {publicDevName(profile)}</p>
           )}
@@ -2904,13 +2954,24 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
             <ChevronRight size={17} className={subtext} />
           </button>
         )}
-        <button type="button" onClick={onOpenAffiliate}
-          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
-          <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
-            <DollarSign size={18} className="text-emerald-500" /> Affiliate dashboard
-          </span>
-          <ChevronRight size={17} className={subtext} />
-        </button>
+        {profile.is_owner && onOpenAffiliateAdmin && (
+          <button type="button" onClick={onOpenAffiliateAdmin}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+              <DollarSign size={18} className="text-emerald-500" /> Affiliate Admin
+            </span>
+            <ChevronRight size={17} className={subtext} />
+          </button>
+        )}
+        {!profile.is_owner && onOpenAffiliate && (
+          <button type="button" onClick={onOpenAffiliate}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+              <DollarSign size={18} className="text-emerald-500" /> Affiliate program
+            </span>
+            <ChevronRight size={17} className={subtext} />
+          </button>
+        )}
 
         <div className={`rounded-2xl border p-4 ${card}`}>
           <p className={`text-[12px] font-bold uppercase tracking-wider mb-2 ${subtext}`}>Trust &amp; policies</p>
@@ -3626,6 +3687,219 @@ function StarPicker({ value, onChange, size = 22 }) {
   );
 }
 
+
+function AffiliateAdminDashboard({ session, profile, onClose, dark, showToast }) {
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100';
+  const border = dark ? 'border-white/10' : 'border-gray-100';
+  const bg = dark ? 'bg-[#0a0e27]' : 'bg-[#f8fafc]';
+  const [list, setList] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [tab, setTab] = useState('applications'); // applications | earnings | codes
+  const [filter, setFilter] = useState('all'); // all | pending | active | rejected | blocked
+
+  const load = async () => {
+    let remote = [];
+    try {
+      remote = await sbSelect('affiliates', 'select=*&order=created_at.desc', session);
+    } catch {
+      remote = [];
+    }
+    const local = loadLocalAffiliates();
+    const byKey = {};
+    for (const a of local) byKey[a.userId || a.code || a.email] = { ...a };
+    for (const r of remote || []) {
+      const key = r.user_id || r.email || r.code;
+      byKey[key] = {
+        userId: r.user_id,
+        email: r.email,
+        code: r.code,
+        wallet: r.payout_wallet || '',
+        status: r.status || 'pending',
+        createdAt: r.created_at,
+      };
+    }
+    const merged = Object.values(byKey);
+    setList(merged);
+    saveLocalAffiliates(merged.map((a) => ({
+      userId: a.userId,
+      email: a.email,
+      code: a.code,
+      wallet: a.wallet,
+      status: a.status,
+      createdAt: a.createdAt,
+    })));
+  };
+
+  useEffect(() => { load(); }, [session]);
+
+  const setStatus = async (aff, status) => {
+    const idKey = aff.userId || aff.email || aff.code;
+    setBusyId(idKey);
+    try {
+      if (aff.userId && session) {
+        await sbUpdate('affiliates', { status }, { user_id: aff.userId }, session).catch(() => {});
+      }
+      const next = loadLocalAffiliates().map((a) =>
+        (aff.userId && a.userId === aff.userId) || (aff.email && a.email === aff.email) ? { ...a, status } : a
+      );
+      saveLocalAffiliates(next);
+      await load();
+      const label = status === 'active' ? 'accepted' : status;
+      showToast?.(`${aff.email || aff.userId || 'Affiliate'} ${label}`, status === 'active' ? 'success' : 'info');
+    } catch (e) {
+      showToast?.(e.message || 'Update failed', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const filtered = list.filter((a) => (filter === 'all' ? true : a.status === filter));
+  const allSales = loadAttributions();
+  const allCodes = loadAffiliateCodes();
+  const totalCredit = allSales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
+  const chart = (() => {
+    const byDay = {};
+    for (const r of allSales) {
+      const day = (r.createdAt || '').slice(0, 10) || 'unknown';
+      if (!byDay[day]) byDay[day] = { day, credit: 0, sales: 0 };
+      byDay[day].credit += parseFloat(r.creditUsdt) || 0;
+      byDay[day].sales += 1;
+    }
+    return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
+  })();
+
+  return (
+    <div className={`fixed inset-0 z-[130] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${dark ? 'bg-[#0a0e27]' : 'bg-white'} ${border}`}>
+        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className={`font-bold text-[15px] ${text}`}>Affiliate Admin</p>
+          <p className={`text-[11.5px] ${subtext}`}>Owner only · approve people, track earnings &amp; codes</p>
+        </div>
+      </div>
+
+      <div className={`flex gap-1 px-4 border-b overflow-x-auto ${border} ${dark ? 'bg-[#0a0e27]' : 'bg-white'}`}>
+        {[
+          ['applications', 'Applications'],
+          ['earnings', 'Earnings'],
+          ['codes', 'Live codes'],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setTab(id)}
+            className={`px-3 py-3 text-[13px] font-semibold border-b-2 whitespace-nowrap ${tab === id ? 'border-emerald-500 text-emerald-600' : `border-transparent ${subtext}`}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-4 max-w-3xl mx-auto space-y-4 pb-16">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            ['Pending', list.filter((a) => a.status === 'pending').length, 'text-amber-500'],
+            ['Active', list.filter((a) => a.status === 'active').length, 'text-emerald-500'],
+            ['Rejected/Blocked', list.filter((a) => a.status === 'rejected' || a.status === 'blocked').length, 'text-red-500'],
+            ['Credit owed', `${totalCredit.toFixed(2)}`, 'text-violet-500'],
+          ].map(([label, val, color]) => (
+            <div key={label} className={`rounded-2xl border p-3 ${card}`}>
+              <p className={`text-[10px] font-bold uppercase ${subtext}`}>{label}</p>
+              <p className={`text-xl font-extrabold ${color}`}>{val}</p>
+            </div>
+          ))}
+        </div>
+
+        {tab === 'applications' && (
+          <>
+            <div className="flex flex-wrap gap-1.5">
+              {['all', 'pending', 'active', 'rejected', 'blocked'].map((f) => (
+                <button key={f} type="button" onClick={() => setFilter(f)}
+                  className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold capitalize ${filter === f ? 'bg-emerald-600 text-white' : dark ? 'bg-white/10 text-slate-300' : 'bg-white border border-gray-200 text-gray-600'}`}>
+                  {f}
+                </button>
+              ))}
+            </div>
+            <p className={`text-[12px] ${subtext}`}>Accept or reject the <b>person</b> (program application). Codes are managed by promoters after they are active.</p>
+            {filtered.length === 0 ? (
+              <p className={`text-[13px] py-8 text-center ${subtext}`}>No applications in this filter.</p>
+            ) : filtered.map((a) => {
+              const sales = allSales.filter((r) => r.affiliateUserId === a.userId || r.code === a.code);
+              const earned = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
+              const codes = allCodes.filter((c) => c.affiliateUserId === a.userId);
+              const busy = busyId === (a.userId || a.email || a.code);
+              return (
+                <div key={a.userId || a.email || a.code} className={`rounded-2xl border p-4 ${card}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={`font-bold text-[14px] ${text}`}>{a.email || 'No email'}</p>
+                      <p className={`text-[11px] ${subtext}`}>Status: <span className="font-semibold">{a.status}</span> · joined {(a.createdAt || '').slice(0, 10) || '—'}</p>
+                      <p className={`text-[12px] mt-1 ${text}`}>{sales.length} sales · <span className="text-emerald-500 font-bold">{earned.toFixed(2)} USDT</span> credit · {codes.length} code(s)</p>
+                      {a.wallet && <p className={`text-[10px] font-mono truncate mt-1 ${subtext}`}>{a.wallet}</p>}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button type="button" disabled={busy || a.status === 'active'} onClick={() => setStatus(a, 'active')}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40">Accept</button>
+                      <button type="button" disabled={busy} onClick={() => setStatus(a, 'rejected')}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500 text-white disabled:opacity-40">Reject</button>
+                      <button type="button" disabled={busy} onClick={() => setStatus(a, 'blocked')}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-600 text-white disabled:opacity-40">Block</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {tab === 'earnings' && (
+          <div className={`rounded-2xl border p-4 ${card}`}>
+            <p className={`font-bold text-[14px] mb-2 ${text}`}>All affiliate credits over time</p>
+            {chart.length === 0 ? (
+              <p className={`text-[12px] py-10 text-center ${subtext}`}>No attributed sales yet</p>
+            ) : (
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chart}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Credit']} />
+                    <Bar dataKey="credit" fill="#10b981" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <ul className="mt-3 space-y-2 max-h-56 overflow-y-auto">
+              {allSales.slice().reverse().slice(0, 40).map((r) => (
+                <li key={r.id} className={`text-[12px] flex justify-between gap-2 ${subtext}`}>
+                  <span className="truncate">{(r.createdAt || '').slice(0, 10)} · {r.code} · {r.appName || 'App'}</span>
+                  <span className="text-emerald-500 font-semibold shrink-0">+{r.creditUsdt}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {tab === 'codes' && (
+          <div className={`rounded-2xl border p-4 ${card}`}>
+            <p className={`font-bold text-[14px] mb-2 ${text}`}>Promoter-generated checkout codes</p>
+            <p className={`text-[12px] mb-3 ${subtext}`}>Read-only view. Accept/reject is on the application, not the code.</p>
+            {allCodes.length === 0 ? (
+              <p className={`text-[12px] py-8 text-center ${subtext}`}>No codes generated yet</p>
+            ) : allCodes.slice().reverse().map((c) => (
+              <div key={c.code + c.appId} className={`rounded-xl p-3 mb-2 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
+                <p className={`font-bold text-[13px] ${text}`}>{c.code} <span className={`text-[11px] ${isCodeExpired(c) ? 'text-red-500' : 'text-emerald-500'}`}>{isCodeExpired(c) ? 'expired' : 'live'}</span></p>
+                <p className={`text-[11px] ${subtext}`}>{c.appName} · promoter {c.affiliateUserId?.slice?.(0, 8) || '—'}… · exp {(c.expiresAt || '').slice(0, 10)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdminDashboard({ session, profile, onClose, dark, showToast }) {
   const [allApps, setAllApps] = useState([]);
   const [totalReviews, setTotalReviews] = useState(0);
@@ -3807,58 +4081,7 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
         </div>
 
         
-        {/* Affiliates — admin only */}
-        <div className={`rounded-2xl border p-4 mb-8 ${border} ${card}`}>
-          <p className={`font-bold text-[14px] ${text} mb-1`}>Affiliates</p>
-          <p className={`text-[11.5px] ${subtext} mb-3`}>Signups, earnings credits, approve / reject / block. Only active codes earn at checkout.</p>
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
-              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Pending</p>
-              <p className="text-lg font-extrabold text-amber-500">{affiliatesList.filter(a => a.status === 'pending').length}</p>
-            </div>
-            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
-              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Active</p>
-              <p className="text-lg font-extrabold text-emerald-500">{affiliatesList.filter(a => a.status === 'active').length}</p>
-            </div>
-            <div className={`rounded-xl p-2.5 ${dark ? 'bg-black/20' : 'bg-white'}`}>
-              <p className={`text-[10px] uppercase font-semibold ${subtext}`}>Blocked</p>
-              <p className="text-lg font-extrabold text-red-500">{affiliatesList.filter(a => a.status === 'blocked' || a.status === 'rejected').length}</p>
-            </div>
-          </div>
-          {affiliatesList.length === 0 ? (
-            <p className={`text-[13px] ${subtext}`}>No affiliate signups yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {affiliatesList.map((a) => {
-                const sales = loadAttributions().filter((r) => r.code === a.code);
-                const earned = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
-                const busy = affBusyId === (a.userId || a.code);
-                return (
-                  <div key={a.code || a.userId} className={`rounded-xl border p-3 ${dark ? 'border-white/10 bg-black/20' : 'border-gray-200 bg-white'}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className={`font-bold text-[13px] ${text}`}>{a.code} <span className={`text-[11px] font-semibold ${subtext}`}>· {a.status}</span></p>
-                        <p className={`text-[11px] ${subtext} truncate`}>{a.email || a.userId || '—'}</p>
-                        <p className={`text-[12px] mt-1 ${text}`}>{sales.length} sales · <span className="text-emerald-500 font-bold">{earned.toFixed(2)} USDT</span> credit</p>
-                        {a.wallet && <p className={`text-[10px] font-mono truncate ${subtext}`}>{a.wallet}</p>}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        <button type="button" disabled={busy || a.status === 'active'} onClick={() => setAffStatus(a, 'active')}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40">Accept</button>
-                        <button type="button" disabled={busy} onClick={() => setAffStatus(a, 'rejected')}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white disabled:opacity-40">Reject</button>
-                        <button type="button" disabled={busy} onClick={() => setAffStatus(a, 'blocked')}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-600 text-white disabled:opacity-40">Block</button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-{/* Store visitors */}
+        {/* Store visitors */}
         <div className={`rounded-2xl border p-4 mb-8 ${border} ${card}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
@@ -4563,7 +4786,7 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, onOpenAffiliateAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
   const dark = false;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -4747,6 +4970,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                 <ProfileView
                   onProfileUpdated={onProfileUpdated}
                   onOpenAffiliate={onOpenAffiliate}
+                  onOpenAffiliateAdmin={onOpenAffiliateAdmin}
                   session={session}
                   profile={profile}
                   wallet={wallet}
@@ -4831,7 +5055,7 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, onOpenAffiliateAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
   const dark = false;
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -5069,6 +5293,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
           <ProfileView
                   onProfileUpdated={onProfileUpdated}
                   onOpenAffiliate={onOpenAffiliate}
+                  onOpenAffiliateAdmin={onOpenAffiliateAdmin}
             session={session}
             profile={profile}
             wallet={wallet}
@@ -5126,6 +5351,7 @@ export default function NexaStore() {
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showAffiliateDash, setShowAffiliateDash] = useState(false);
+  const [showAffiliateAdmin, setShowAffiliateAdmin] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [selectedApp, setSelectedApp] = useState(null);
 
@@ -5357,6 +5583,7 @@ export default function NexaStore() {
     onOpenTutorials: openTutorialHub,
     onProfileUpdated: setProfile,
     onOpenAffiliate: () => setShowAffiliateDash(true),
+    onOpenAffiliateAdmin: () => setShowAffiliateAdmin(true),
     onOpenTutorial: openTutorialById,
   };
   void ownedTick;
@@ -5366,8 +5593,11 @@ export default function NexaStore() {
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
-      {showAffiliateDash && session && profile && (
+      {showAffiliateDash && session && profile && !profile.is_owner && (
         <AffiliateDashboard session={session} profile={profile} onClose={() => setShowAffiliateDash(false)} dark={false} showToast={showToast} paidApps={(allApps || []).filter((a) => (parseFloat(a.price) || 0) > 0 && a.status === 'approved')} />
+      )}
+      {showAffiliateAdmin && session && profile && profile.is_owner && (
+        <AffiliateAdminDashboard session={session} profile={profile} onClose={() => setShowAffiliateAdmin(false)} dark={false} showToast={showToast} />
       )}
       {showDevConsole && session && profile && (
         <>
