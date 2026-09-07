@@ -100,6 +100,35 @@ function saveAttributions(list) {
   } catch {}
 }
 
+function recordAffiliateSale({ code, appId, appName, amountUsdt, buyerId }) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  const row = findAffiliateCodeRow(c, appId);
+  if (!row) return null;
+  const affUserId = row.affiliateUserId || row.userId;
+  if (buyerId && affUserId && buyerId === affUserId) return null;
+  const amount = Math.max(0, parseFloat(amountUsdt) || 0);
+  const credit = Math.round(amount * AFF_RATE * 100) / 100;
+  const entry = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    code: c,
+    affiliateUserId: affUserId || null,
+    appId,
+    appName,
+    amountUsdt: amount,
+    creditUsdt: credit,
+    buyerId: buyerId || null,
+    createdAt: new Date().toISOString(),
+    status: 'pending_payout',
+  };
+  const list = loadAttributions();
+  list.push(entry);
+  saveAttributions(list);
+  return entry;
+}
+
+
+
 function generatePromoCode(seed = '') {
   const base = (seed || 'PULSE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'PULSE';
   const tail = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -107,15 +136,38 @@ function generatePromoCode(seed = '') {
 }
 
 const AFF_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const AFF_CODES_KEY = 'nexastore_affiliate_codes_v1';
 
-function isCodeExpired(aff) {
-  if (!aff?.code) return true;
-  if (!aff.codeExpiresAt) return false; // legacy codes without expiry treated as expired for safety → must regenerate
-  return Date.now() > new Date(aff.codeExpiresAt).getTime();
+function loadAffiliateCodes() {
+  try {
+    const raw = localStorage.getItem(AFF_CODES_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
 }
 
-function isCodeLive(aff) {
-  return !!(aff && aff.status === 'active' && aff.code && !isCodeExpired(aff));
+function saveAffiliateCodes(list) {
+  try {
+    localStorage.setItem(AFF_CODES_KEY, JSON.stringify(list.slice(-200)));
+  } catch {}
+}
+
+function isCodeExpired(entry) {
+  if (!entry?.code) return true;
+  if (!entry.expiresAt && !entry.codeExpiresAt) return true;
+  const exp = entry.expiresAt || entry.codeExpiresAt;
+  return Date.now() > new Date(exp).getTime();
+}
+
+function getLiveCodeForApp(affiliateUserId, appId) {
+  return loadAffiliateCodes().find(
+    (c) =>
+      c.affiliateUserId === affiliateUserId &&
+      c.appId === appId &&
+      !isCodeExpired(c)
+  ) || null;
 }
 
 function getPromoFromUrl() {
@@ -134,13 +186,22 @@ function rememberPromo(code) {
   } catch {}
 }
 
-function findAffiliateByCode(code) {
+/** Live code row only if affiliate is active and code not expired; optional appId match */
+function findAffiliateCodeRow(code, appId = null) {
   const c = String(code || '').trim().toUpperCase();
   if (!c) return null;
-  const aff = loadLocalAffiliates().find((a) => a.code === c);
+  const row = loadAffiliateCodes().find((x) => x.code === c);
+  if (!row || isCodeExpired(row)) return null;
+  if (appId && row.appId && row.appId !== appId) return null;
+  const aff = loadLocalAffiliates().find((a) => a.userId === row.affiliateUserId);
   if (!aff || aff.status !== 'active') return null;
-  if (isCodeExpired(aff)) return null;
-  return aff;
+  return { ...row, status: aff.status, userId: aff.userId };
+}
+
+function findAffiliateByCode(code) {
+  const row = findAffiliateCodeRow(code);
+  if (!row) return null;
+  return { userId: row.affiliateUserId || row.userId, code: row.code, status: 'active', appId: row.appId };
 }
 
 function setAffiliateStatusLocal(userId, status) {
@@ -149,8 +210,11 @@ function setAffiliateStatusLocal(userId, status) {
   return list;
 }
 
-function affiliateEarningsByDay(code) {
-  const sales = loadAttributions().filter((r) => r.code === code);
+function affiliateEarningsByDay(filter) {
+  let sales = loadAttributions();
+  if (filter?.code) sales = sales.filter((r) => r.code === filter.code);
+  if (filter?.userId) sales = sales.filter((r) => r.affiliateUserId === filter.userId);
+  if (filter?.appId) sales = sales.filter((r) => r.appId === filter.appId);
   const byDay = {};
   for (const r of sales) {
     const day = (r.createdAt || '').slice(0, 10) || 'unknown';
@@ -161,13 +225,11 @@ function affiliateEarningsByDay(code) {
   return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
 }
 
-/** Account only — no promo code until admin accepts AND user clicks Generate */
 async function ensureAffiliateForUser(profile, session) {
   if (!profile?.id) return null;
   const local = loadLocalAffiliates();
   let mine = local.find((a) => a.userId === profile.id);
   if (mine) {
-    // refresh from remote if possible
     try {
       if (session) {
         const rows = await sbSelect('affiliates', `user_id=eq.${profile.id}&select=*&limit=1`, session);
@@ -175,15 +237,11 @@ async function ensureAffiliateForUser(profile, session) {
           mine = {
             userId: rows[0].user_id,
             email: rows[0].email || profile.email,
-            code: rows[0].code || null,
-            codeExpiresAt: rows[0].code_expires_at || mine.codeExpiresAt || null,
             wallet: rows[0].payout_wallet || mine.wallet || '',
             status: rows[0].status || mine.status || 'pending',
             createdAt: rows[0].created_at || mine.createdAt,
           };
-          const list = local.map((a) => (a.userId === profile.id ? mine : a));
-          if (!local.find((a) => a.userId === profile.id)) list.push(mine);
-          saveLocalAffiliates(list);
+          saveLocalAffiliates(local.map((a) => (a.userId === profile.id ? mine : a)));
         }
       }
     } catch {}
@@ -196,8 +254,6 @@ async function ensureAffiliateForUser(profile, session) {
         mine = {
           userId: rows[0].user_id,
           email: rows[0].email || profile.email,
-          code: rows[0].code || null,
-          codeExpiresAt: rows[0].code_expires_at || null,
           wallet: rows[0].payout_wallet || '',
           status: rows[0].status || 'pending',
           createdAt: rows[0].created_at,
@@ -211,8 +267,6 @@ async function ensureAffiliateForUser(profile, session) {
   mine = {
     userId: profile.id,
     email: profile.email || '',
-    code: null,
-    codeExpiresAt: null,
     wallet: profile.payout_wallet || '',
     status: 'pending',
     createdAt: new Date().toISOString(),
@@ -237,42 +291,54 @@ async function ensureAffiliateForUser(profile, session) {
   return mine;
 }
 
-async function generateAffiliateCodeForUser(profile, session) {
+/**
+ * Generate a checkout promo code for ONE paid app.
+ * Only after admin approval; only if no live code exists for that app.
+ */
+async function generateAffiliateCodeForUser(profile, session, app) {
   const aff = await ensureAffiliateForUser(profile, session);
   if (!aff) throw new Error('Affiliate account missing');
-  if (aff.status !== 'active') throw new Error('Your account must be approved by admin before you can generate a code.');
-  if (aff.code && !isCodeExpired(aff)) {
-    throw new Error('Your current code is still valid. Generate a new one only after it expires.');
+  if (aff.status !== 'active') throw new Error('Admin must approve you before you can generate codes.');
+  if (!app?.id) throw new Error('Pick a paid app first.');
+  const price = parseFloat(app.price) || 0;
+  if (price <= 0) throw new Error('Codes are only for paid apps.');
+
+  const existing = getLiveCodeForApp(profile.id, app.id);
+  if (existing) {
+    throw new Error(`You already have a live code for ${app.name}. Wait until it expires (${new Date(existing.expiresAt).toLocaleDateString()}).`);
   }
+
   const code = generatePromoCode((profile.email || 'NEXA').split('@')[0]);
-  const codeExpiresAt = new Date(Date.now() + AFF_CODE_TTL_MS).toISOString();
-  const next = { ...aff, code, codeExpiresAt };
-  const list = loadLocalAffiliates().map((a) => (a.userId === profile.id ? next : a));
-  saveLocalAffiliates(list);
+  const expiresAt = new Date(Date.now() + AFF_CODE_TTL_MS).toISOString();
+  const row = {
+    code,
+    appId: app.id,
+    appName: app.name,
+    affiliateUserId: profile.id,
+    expiresAt,
+    createdAt: new Date().toISOString(),
+  };
+  const list = loadAffiliateCodes().filter(
+    (c) => !(c.affiliateUserId === profile.id && c.appId === app.id && isCodeExpired(c))
+  );
+  list.push(row);
+  saveAffiliateCodes(list);
+
   try {
     if (session) {
-      await sbUpdate(
-        'affiliates',
-        { code, code_expires_at: codeExpiresAt },
-        { user_id: profile.id },
+      await sbInsert(
+        'affiliate_codes',
+        {
+          code,
+          app_id: app.id,
+          user_id: profile.id,
+          expires_at: expiresAt,
+        },
         session
-      ).catch(async () => {
-        await sbInsert(
-          'affiliates',
-          {
-            user_id: profile.id,
-            email: profile.email || null,
-            code,
-            code_expires_at: codeExpiresAt,
-            payout_wallet: next.wallet || null,
-            status: aff.status,
-          },
-          session
-        ).catch(() => {});
-      });
+      ).catch(() => {});
     }
   } catch {}
-  return next;
+  return row;
 }
 
 function formatPrice(price) {
@@ -1490,6 +1556,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   </p>
                 </div>
 
+                {(parseFloat(app?.price) || 0) > 0 && (
                 <div>
                   <label className={`block text-[11px] font-semibold mb-1 ${subtext}`}>Promo code (optional)</label>
                   <input
@@ -1500,11 +1567,12 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                       setPromoCode(v);
                       rememberPromo(v);
                     }}
-                    placeholder="e.g. PULSE7X"
+                    placeholder="Code for this paid app"
                     className={`w-full px-3 py-2 rounded-xl text-[13px] font-mono tracking-wide focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? 'bg-white/10 text-white placeholder-slate-500 border border-white/10' : 'bg-white border border-gray-200 text-gray-900'}`}
                   />
-                  <p className={`text-[10.5px] mt-1 ${subtext}`}>From an affiliate link or promoter. Does not change the price.</p>
+                  <p className={`text-[10.5px] mt-1 ${subtext}`}>Must match a live code for this app. Does not change the price.</p>
                 </div>
+                )}
 
                 {firstTime && (
                   <div className={`rounded-xl border p-3 ${dark ? 'bg-violet-500/10 border-violet-500/25' : 'bg-violet-50 border-violet-100'}`}>
@@ -1710,7 +1778,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
 
 
-function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
+function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidApps = [] }) {
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
   const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100';
@@ -1722,11 +1790,12 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
   const [genBusy, setGenBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState('overview'); // overview | links | earnings | wallet
+  const [selectedAppId, setSelectedAppId] = useState('');
+  const [myCodes, setMyCodes] = useState([]);
 
-  const refresh = async () => {
-    const a = await ensureAffiliateForUser(profile, session);
-    setAff(a);
-    setWallet(a?.wallet || '');
+  const refreshCodes = () => {
+    if (!profile?.id) return setMyCodes([]);
+    setMyCodes(loadAffiliateCodes().filter((c) => c.affiliateUserId === profile.id));
   };
 
   useEffect(() => {
@@ -1736,23 +1805,23 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
       if (!cancelled) {
         setAff(a);
         setWallet(a?.wallet || '');
+        refreshCodes();
+        if (paidApps.length && !selectedAppId) {
+          setSelectedAppId(paidApps[0].id);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [profile?.id, session]);
+  }, [profile?.id, session, paidApps.length]);
 
-  const codeLive = isCodeLive(aff);
-  const codeExpired = aff?.code && isCodeExpired(aff);
-  const sales = useMemo(() => {
-    if (!aff?.code) return [];
-    return loadAttributions().filter((r) => r.code === aff.code);
-  }, [aff?.code, aff]);
-  // also sales for all historical codes under this user - filter by affiliateUserId
+  const selectedApp = paidApps.find((a) => a.id === selectedAppId) || null;
+  const liveForApp = selectedApp && profile?.id ? getLiveCodeForApp(profile.id, selectedApp.id) : null;
+  const codeLive = !!liveForApp;
+
   const allSales = useMemo(() => {
-    if (!profile?.id) return sales;
-    const byUser = loadAttributions().filter((r) => r.affiliateUserId === profile.id);
-    return byUser.length ? byUser : sales;
-  }, [profile?.id, sales]);
+    if (!profile?.id) return [];
+    return loadAttributions().filter((r) => r.affiliateUserId === profile.id);
+  }, [profile?.id, myCodes.length]);
 
   const chart = useMemo(() => {
     const byDay = {};
@@ -1770,20 +1839,14 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
   const status = aff?.status || 'pending';
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nexastore-baj.pages.dev';
-  const code = aff?.code || '';
-  const links = codeLive ? [
-    ['Store home', `${origin}/?promo=${encodeURIComponent(code)}`],
-    ['Hi-Note', `${origin}/app/hi-note/?promo=${encodeURIComponent(code)}`],
-    ['Program rules', `${origin}/affiliates/`],
-  ] : [];
 
   const onGenerate = async () => {
     setGenBusy(true);
     try {
-      const next = await generateAffiliateCodeForUser(profile, session);
-      setAff(next);
-      showToast?.(`Code ${next.code} generated — valid 30 days`, 'success');
-      setTab('links');
+      if (!selectedApp) throw new Error('Select a paid app first.');
+      const next = await generateAffiliateCodeForUser(profile, session, selectedApp);
+      refreshCodes();
+      showToast?.(`Code ${next.code} for ${selectedApp.name} — valid 30 days`, 'success');
     } catch (e) {
       showToast?.(e.message || 'Could not generate code', 'error');
     } finally {
@@ -1868,13 +1931,11 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
                     }`}>{status}</span>
                   </div>
                   {status === 'pending' && <p className={`text-[12.5px] mt-2 ${subtext}`}>Waiting for admin approval. You cannot generate a live promo code until accepted.</p>}
-                  {status === 'active' && !codeLive && (
-                    <p className={`text-[12.5px] mt-2 ${subtext}`}>
-                      {codeExpired ? 'Your last code expired. Generate a new one to keep promoting.' : 'No active code yet. Open Code & links and press Generate code.'}
-                    </p>
+                  {status === 'active' && !myCodes.some((c) => !isCodeExpired(c)) && (
+                    <p className={`text-[12.5px] mt-2 ${subtext}`}>No live codes. Open Code & links, pick a paid app, then Generate.</p>
                   )}
-                  {codeLive && (
-                    <p className={`text-[12.5px] mt-2 ${subtext}`}>Live code <b className={text}>{aff.code}</b> · expires {expiresLabel}</p>
+                  {myCodes.some((c) => !isCodeExpired(c)) && (
+                    <p className={`text-[12.5px] mt-2 ${subtext}`}>{myCodes.filter((c) => !isCodeExpired(c)).length} live app code(s). Manage under Code & links.</p>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1911,46 +1972,64 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
             {tab === 'links' && (
               <>
                 <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
-                  <p className={`font-bold text-[14px] ${text}`}>Promo code</p>
+                  <p className={`font-bold text-[14px] ${text}`}>Checkout codes (paid apps only)</p>
+                  <p className={`text-[12px] ${subtext}`}>Each code unlocks credit only when a buyer pays for that specific app.</p>
                   {status !== 'active' ? (
-                    <p className={`text-[13px] ${subtext}`}>Admin must Accept your affiliate account before codes are available.</p>
-                  ) : codeLive ? (
-                    <>
-                      <p className={`text-[32px] font-black tracking-widest ${text}`}>{aff.code}</p>
-                      <p className={`text-[12px] ${subtext}`}>Expires {expiresLabel}</p>
-                      <button type="button" onClick={() => copy(aff.code)} className="text-[12px] font-bold text-violet-600">
-                        {copied === aff.code ? 'Copied' : 'Copy code'}
-                      </button>
-                      <p className={`text-[11px] ${subtext}`}>Generate is disabled until this code expires.</p>
-                    </>
+                    <p className={`text-[13px] ${subtext}`}>Admin must Accept you before you can generate codes.</p>
+                  ) : paidApps.length === 0 ? (
+                    <p className={`text-[13px] ${subtext}`}>No paid apps in the catalog right now.</p>
                   ) : (
                     <>
-                      <p className={`text-[13px] ${subtext}`}>
-                        {codeExpired ? 'Previous code expired.' : 'No code yet.'} Click generate to create a new 30-day code.
-                      </p>
-                      {aff.code && codeExpired && (
-                        <p className={`text-[12px] font-mono ${subtext}`}>Last code: {aff.code} (expired)</p>
+                      <label className={`block text-[11px] font-semibold ${subtext}`}>App</label>
+                      <select
+                        value={selectedAppId}
+                        onChange={(e) => setSelectedAppId(e.target.value)}
+                        className={`w-full px-3 py-2.5 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`}
+                      >
+                        {paidApps.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name} · {formatPrice(a.price)}</option>
+                        ))}
+                      </select>
+                      {liveForApp ? (
+                        <>
+                          <p className={`text-[28px] font-black tracking-widest ${text}`}>{liveForApp.code}</p>
+                          <p className={`text-[12px] ${subtext}`}>For {liveForApp.appName} · expires {new Date(liveForApp.expiresAt).toLocaleString()}</p>
+                          <button type="button" onClick={() => copy(liveForApp.code)} className="text-[12px] font-bold text-violet-600">
+                            {copied === liveForApp.code ? 'Copied' : 'Copy code'}
+                          </button>
+                          <p className={`text-[11px] ${subtext}`}>Generate stays off until this app's code expires.</p>
+                        </>
+                      ) : (
+                        <button type="button" disabled={genBusy || !selectedApp} onClick={onGenerate}
+                          className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 disabled:opacity-50">
+                          {genBusy ? 'Generating…' : `Generate code for ${selectedApp?.name || 'app'}`}
+                        </button>
                       )}
-                      <button type="button" disabled={genBusy} onClick={onGenerate}
-                        className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 disabled:opacity-50">
-                        {genBusy ? 'Generating…' : 'Generate code'}
-                      </button>
                     </>
                   )}
                 </div>
                 <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
-                  <p className={`font-bold text-[14px] ${text}`}>Copyable links</p>
-                  {!codeLive ? (
-                    <p className={`text-[12px] ${subtext}`}>Links appear after you have a live (non-expired) code.</p>
-                  ) : links.map(([label, url]) => (
-                    <div key={label} className={`rounded-xl p-3 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
-                      <p className={`text-[11px] font-semibold ${subtext}`}>{label}</p>
-                      <p className={`text-[11px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{url}</p>
-                      <button type="button" onClick={() => copy(url)} className="text-[11px] font-bold text-violet-600 mt-1">
-                        {copied === url ? 'Copied' : 'Copy link'}
-                      </button>
-                    </div>
-                  ))}
+                  <p className={`font-bold text-[14px] ${text}`}>Your codes</p>
+                  {myCodes.length === 0 ? (
+                    <p className={`text-[12px] ${subtext}`}>None yet.</p>
+                  ) : myCodes.slice().reverse().map((c) => {
+                    const live = !isCodeExpired(c);
+                    const appLink = `${origin}/?app=${encodeURIComponent(c.appId)}&promo=${encodeURIComponent(c.code)}`;
+                    return (
+                      <div key={c.code + c.appId} className={`rounded-xl p-3 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
+                        <p className={`font-bold text-[13px] ${text}`}>{c.code} <span className={`text-[11px] font-semibold ${live ? 'text-emerald-500' : 'text-red-500'}`}>{live ? 'live' : 'expired'}</span></p>
+                        <p className={`text-[11px] ${subtext}`}>{c.appName} · exp {new Date(c.expiresAt).toLocaleDateString()}</p>
+                        {live && (
+                          <>
+                            <p className={`text-[10px] font-mono break-all mt-1 ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{appLink}</p>
+                            <button type="button" onClick={() => copy(appLink)} className="text-[11px] font-bold text-violet-600 mt-1">
+                              {copied === appLink ? 'Copied' : 'Copy checkout link'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -4668,7 +4747,7 @@ export default function NexaStore() {
       <DesktopApp {...shared} />
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
       {showAffiliateDash && session && profile && (
-        <AffiliateDashboard session={session} profile={profile} onClose={() => setShowAffiliateDash(false)} dark={false} showToast={showToast} />
+        <AffiliateDashboard session={session} profile={profile} onClose={() => setShowAffiliateDash(false)} dark={false} showToast={showToast} paidApps={(allApps || []).filter((a) => (parseFloat(a.price) || 0) > 0 && a.status === 'approved')} />
       )}
       {showDevConsole && session && profile && (
         <>
