@@ -3,11 +3,11 @@ import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
 import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
-const SUPABASE_URL = "https://svowrpsmthoatgdwqtce.supabase.co";
+const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
 const REST = `${SUPABASE_URL}/rest/v1`;
 const STORAGEAPI = `${SUPABASE_URL}/storage/v1`;
 const AUTHAPI = `${SUPABASE_URL}/auth/v1`;
-const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN2b3dycHNtdGhvYXRnZHdxdGNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NjAyMDgsImV4cCI6MjEwMDAzNjIwOH0.zSLhjEyUnhDJjF4G-f9ylASvDv3waZs3JBuK_c-ROtw";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY";
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
 const PAYOUT_MODE = "direct";
 
@@ -2867,7 +2867,7 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
       setError('Could not load apps — ' + e.message);
     }
     try {
-      const reviews = await sbSelect('reviews', 'select=id', session).catch(() => []);
+      const reviews = await sbSelect('app_reviews', 'select=id', session).catch(() => []);
       setTotalReviews((reviews || []).length);
     } catch {}
     try {
@@ -2908,7 +2908,7 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
     setBusyId(app.id);
     setError('');
     try {
-      await sbDelete('reviews', { app_id: app.id }, session).catch(() => {});
+      await sbDelete('app_reviews', { app_id: app.id }, session).catch(() => {});
       await sbDelete('wishlists', { app_id: app.id }, session).catch(() => {});
       await sbDelete('app_screenshots', { app_id: app.id }, session).catch(() => {});
       await sbDelete('app_bits', { app_id: app.id }, session).catch(() => {});
@@ -3138,7 +3138,7 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
         if (!cancelled) setScreenshots(ss || []);
       } catch {}
       try {
-        const rv = await sbSelect('reviews', `app_id=eq.${app.id}&order=created_at.desc`).catch(() => []);
+        const rv = await sbSelect('app_reviews', `app_id=eq.${app.id}&order=created_at.desc`).catch(() => []);
         if (!cancelled) setReviews(rv || []);
       } catch {}
       if (app.dev_id) {
@@ -3175,7 +3175,7 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
   useEffect(() => {
     if (myExistingReview) {
       setMyRating(myExistingReview.rating || 0);
-      setMyReviewText(myExistingReview.comment || '');
+      setMyReviewText(myExistingReview.review_text || '');
     }
   }, [myExistingReview?.id, myExistingReview?.rating, myExistingReview?.review_text]);
 
@@ -3188,7 +3188,7 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
       if (myExistingReview?.id) {
         await sbUpdate(
           'app_reviews',
-          { rating: myRating, comment: myReviewText.trim() || null },
+          { rating: myRating, review_text: myReviewText.trim() || null },
           { id: myExistingReview.id },
           session
         );
@@ -3196,12 +3196,12 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
       } else {
         await sbInsert(
           'app_reviews',
-          { app_id: app.id, user_id: profile.id, rating: myRating, comment: myReviewText.trim() || null },
+          { app_id: app.id, user_id: profile.id, rating: myRating, review_text: myReviewText.trim() || null },
           session
         );
         showToast?.('Review posted', 'success');
       }
-      const rv = await sbSelect('reviews', `app_id=eq.${app.id}&order=created_at.desc`);
+      const rv = await sbSelect('app_reviews', `app_id=eq.${app.id}&order=created_at.desc`);
       setReviews(rv || []);
     } catch (e) {
       const msg = (e.message || '').toLowerCase();
@@ -3422,7 +3422,7 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
                   </div>
                   <span className={`text-[11px] ${subtext}`}>{new Date(r.created_at).toLocaleDateString()}</span>
                 </div>
-                {r.comment && <p className={`text-[13px] ${dark ? 'text-slate-300' : 'text-gray-600'} ml-10`}>{r.comment}</p>}
+                {r.review_text && <p className={`text-[13px] ${dark ? 'text-slate-300' : 'text-gray-600'} ml-10`}>{r.review_text}</p>}
               </div>
             ))}
           </div>
