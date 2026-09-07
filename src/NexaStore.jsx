@@ -455,6 +455,13 @@ async function enrichAppsWithDevelopers(apps) {
   }));
 }
 
+const BANNERS = [
+  '/banner-discover.png',
+  '/banner-developer.png',
+  '/banner-gaming.png',
+  '/banner-usdt.png',
+];
+
 function BannerCarousel({ rounded = 'rounded-[28px]', maxHeight = '360px', dotBottom = 'bottom-5' }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
