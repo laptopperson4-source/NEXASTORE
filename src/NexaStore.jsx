@@ -101,9 +101,21 @@ function saveAttributions(list) {
 }
 
 function generatePromoCode(seed = '') {
-  const base = (seed || 'PULSE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PULSE';
-  const tail = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const base = (seed || 'PULSE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'PULSE';
+  const tail = Math.random().toString(36).slice(2, 7).toUpperCase();
   return (base + tail).slice(0, 10);
+}
+
+const AFF_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function isCodeExpired(aff) {
+  if (!aff?.code) return true;
+  if (!aff.codeExpiresAt) return false; // legacy codes without expiry treated as expired for safety → must regenerate
+  return Date.now() > new Date(aff.codeExpiresAt).getTime();
+}
+
+function isCodeLive(aff) {
+  return !!(aff && aff.status === 'active' && aff.code && !isCodeExpired(aff));
 }
 
 function getPromoFromUrl() {
@@ -125,7 +137,10 @@ function rememberPromo(code) {
 function findAffiliateByCode(code) {
   const c = String(code || '').trim().toUpperCase();
   if (!c) return null;
-  return loadLocalAffiliates().find((a) => a.code === c && a.status === 'active') || null;
+  const aff = loadLocalAffiliates().find((a) => a.code === c);
+  if (!aff || aff.status !== 'active') return null;
+  if (isCodeExpired(aff)) return null;
+  return aff;
 }
 
 function setAffiliateStatusLocal(userId, status) {
@@ -146,38 +161,34 @@ function affiliateEarningsByDay(code) {
   return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
 }
 
-function recordAffiliateSale({ code, appId, appName, amountUsdt, buyerId }) {
-  const c = String(code || '').trim().toUpperCase();
-  if (!c) return null;
-  const aff = findAffiliateByCode(c);
-  if (!aff) return null;
-  if (buyerId && aff.userId && buyerId === aff.userId) return null; // no self-purchase credit
-  const amount = Math.max(0, parseFloat(amountUsdt) || 0);
-  const credit = Math.round(amount * AFF_RATE * 100) / 100;
-  const row = {
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    code: c,
-    affiliateUserId: aff.userId || null,
-    appId,
-    appName,
-    amountUsdt: amount,
-    creditUsdt: credit,
-    buyerId: buyerId || null,
-    createdAt: new Date().toISOString(),
-    status: 'pending_payout',
-  };
-  const list = loadAttributions();
-  list.push(row);
-  saveAttributions(list);
-  return row;
-}
-
+/** Account only — no promo code until admin accepts AND user clicks Generate */
 async function ensureAffiliateForUser(profile, session) {
   if (!profile?.id) return null;
   const local = loadLocalAffiliates();
   let mine = local.find((a) => a.userId === profile.id);
-  if (mine) return mine;
-  // try remote
+  if (mine) {
+    // refresh from remote if possible
+    try {
+      if (session) {
+        const rows = await sbSelect('affiliates', `user_id=eq.${profile.id}&select=*&limit=1`, session);
+        if (rows?.[0]) {
+          mine = {
+            userId: rows[0].user_id,
+            email: rows[0].email || profile.email,
+            code: rows[0].code || null,
+            codeExpiresAt: rows[0].code_expires_at || mine.codeExpiresAt || null,
+            wallet: rows[0].payout_wallet || mine.wallet || '',
+            status: rows[0].status || mine.status || 'pending',
+            createdAt: rows[0].created_at || mine.createdAt,
+          };
+          const list = local.map((a) => (a.userId === profile.id ? mine : a));
+          if (!local.find((a) => a.userId === profile.id)) list.push(mine);
+          saveLocalAffiliates(list);
+        }
+      }
+    } catch {}
+    return mine;
+  }
   try {
     if (session) {
       const rows = await sbSelect('affiliates', `user_id=eq.${profile.id}&select=*&limit=1`, session);
@@ -185,26 +196,25 @@ async function ensureAffiliateForUser(profile, session) {
         mine = {
           userId: rows[0].user_id,
           email: rows[0].email || profile.email,
-          code: rows[0].code,
+          code: rows[0].code || null,
+          codeExpiresAt: rows[0].code_expires_at || null,
           wallet: rows[0].payout_wallet || '',
-          status: rows[0].status || 'active',
+          status: rows[0].status || 'pending',
           createdAt: rows[0].created_at,
         };
-        if (!local.find((a) => a.userId === profile.id)) {
-          local.push(mine);
-          saveLocalAffiliates(local);
-        }
+        local.push(mine);
+        saveLocalAffiliates(local);
         return mine;
       }
     }
   } catch {}
-  const code = generatePromoCode((profile.email || 'NEXA').split('@')[0]);
   mine = {
     userId: profile.id,
     email: profile.email || '',
-    code,
+    code: null,
+    codeExpiresAt: null,
     wallet: profile.payout_wallet || '',
-    status: 'pending', // admin must approve before codes earn
+    status: 'pending',
     createdAt: new Date().toISOString(),
   };
   local.push(mine);
@@ -216,7 +226,7 @@ async function ensureAffiliateForUser(profile, session) {
         {
           user_id: profile.id,
           email: profile.email || null,
-          code: mine.code,
+          code: null,
           payout_wallet: mine.wallet || null,
           status: 'pending',
         },
@@ -227,552 +237,42 @@ async function ensureAffiliateForUser(profile, session) {
   return mine;
 }
 
-
-const PAYOUT_MODE = "direct";
-
-async function sbSelect(table, qs, token) {
-  const url = `${REST}/${table}?${qs}`;
-  const opts = { headers: { "apikey": ANON_KEY } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-async function sbDownload(bucket, path, token, onProgress) {
-  const url = `${STORAGEAPI}/object/${bucket}/${path}`;
-  const opts = { headers: { "apikey": ANON_KEY } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-
-  let r;
+async function generateAffiliateCodeForUser(profile, session) {
+  const aff = await ensureAffiliateForUser(profile, session);
+  if (!aff) throw new Error('Affiliate account missing');
+  if (aff.status !== 'active') throw new Error('Your account must be approved by admin before you can generate a code.');
+  if (aff.code && !isCodeExpired(aff)) {
+    throw new Error('Your current code is still valid. Generate a new one only after it expires.');
+  }
+  const code = generatePromoCode((profile.email || 'NEXA').split('@')[0]);
+  const codeExpiresAt = new Date(Date.now() + AFF_CODE_TTL_MS).toISOString();
+  const next = { ...aff, code, codeExpiresAt };
+  const list = loadLocalAffiliates().map((a) => (a.userId === profile.id ? next : a));
+  saveLocalAffiliates(list);
   try {
-    r = await fetch(url, opts);
-  } catch {
-    throw new Error("Couldn't reach the server — check your connection and try again.");
-  }
-  if (!r.ok) {
-    throw new Error(r.status === 404 ? "This app's file isn't available yet." : `Download failed (server said ${r.status}).`);
-  }
-
-  const total = parseInt(r.headers.get('Content-Length') || '0', 10);
-  if (!r.body || !total) {
-    const blob = await r.blob();
-    onProgress?.(1);
-    return blob;
-  }
-
-  const reader = r.body.getReader();
-  const chunks = [];
-  let received = 0;
-  while (true) {
-    let step;
-    try {
-      step = await reader.read();
-    } catch {
-      throw new Error("Connection dropped partway through — please try again.");
-    }
-    if (step.done) break;
-    chunks.push(step.value);
-    received += step.value.length;
-    onProgress?.(received / total);
-  }
-  return new Blob(chunks);
-}
-
-function sanitizeFilename(name) {
-  return (name || 'app').trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'app';
-}
-
-function buildDownloadFilename(app) {
-  const rawExt = (app.file_name || '').split('.').pop();
-  const looksLikeExt = rawExt && rawExt.length <= 5 && /^[a-z0-9]+$/i.test(rawExt);
-  const ext = looksLikeExt ? rawExt.toLowerCase() : ((app.file_type || '').includes('android') ? 'apk' : 'zip');
-  return `${sanitizeFilename(app.name)}.${ext}`;
-}
-
-async function sbGetProfile(token) {
-  const r = await fetch(`${AUTHAPI}/user`, {
-    headers: { "apikey": ANON_KEY, "authorization": `Bearer ${token}` }
-  });
-  if (!r.ok) return null;
-  return r.json();
-}
-
-async function sbInsert(table, data, token) {
-  const opts = {
-    method: "POST",
-    body: JSON.stringify(data),
-    headers: { "apikey": ANON_KEY, "Content-Type": "application/json", "Prefer": "return=representation" }
-  };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(`${REST}/${table}`, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-async function sbDelete(table, match, token) {
-  const qs = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
-  const opts = { method: "DELETE", headers: { "apikey": ANON_KEY } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(`${REST}/${table}?${qs}`, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return true;
-}
-
-async function sbUpdate(table, data, match, token) {
-  const qs = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
-  const opts = {
-    method: "PATCH",
-    body: JSON.stringify(data),
-    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
-  };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(`${REST}/${table}?${qs}`, opts);
-  if (!r.ok) throw new Error(await r.text());
-  const text = await r.text();
-  return text ? JSON.parse(text) : true;
-}
-async function sbUpload(bucket, path, file, token) {
-  const url = `${STORAGEAPI}/object/${bucket}/${path}`;
-  const opts = { method: "POST", body: file, headers: { "apikey": ANON_KEY, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-async function sbSignUp(email, password) {
-  const r = await fetch(`${AUTHAPI}/signup`, {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
-  });
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || err.error || 'Sign up failed');
-  }
-  return r.json();
-}
-
-async function sbSignIn(email, password) {
-  const r = await fetch(`${AUTHAPI}/token?grant_type=password`, {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
-  });
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || err.error || 'Sign in failed');
-  }
-  return r.json();
-}
-
-async function sbResetPassword(email) {
-  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://nexastore-baj.pages.dev/';
-  const r = await fetch(`${AUTHAPI}/recover`, {
-    method: 'POST',
-    body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
-    headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
-  });
-  // Supabase often returns 200 even if email unknown (anti-enumeration)
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || err.error || 'Could not send reset email');
-  }
-  return true;
-}
-
-async function sbUpdatePassword(accessToken, newPassword) {
-  const r = await fetch(`${AUTHAPI}/user`, {
-    method: 'PUT',
-    body: JSON.stringify({ password: newPassword }),
-    headers: {
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || err.error || 'Could not update password');
-  }
-  return r.json();
-}
-
-async function sbRefresh(refreshToken) {
-  const r = await fetch(`${AUTHAPI}/token?grant_type=refresh_token`, {
-    method: "POST",
-    body: JSON.stringify({ refresh_token: refreshToken }),
-    headers: { "apikey": ANON_KEY, "Content-Type": "application/json" }
-  });
-  if (!r.ok) return null;
-  return r.json();
-}
-
-const AUTH_STORAGE_KEY = 'nexastore_auth';
-function saveAuthSession(data) {
-  // data: { access_token, refresh_token, expires_at?, expires_in? }
-  if (!data?.access_token) return;
-  const expiresAt = data.expires_at
-    || (data.expires_in ? Math.floor(Date.now() / 1000) + Number(data.expires_in) : null);
-  const payload = {
-    access_token: data.access_token,
-    refresh_token: data.refresh_token || null,
-    expires_at: expiresAt,
-  };
-  try {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-    localStorage.setItem('token', data.access_token); // backward compat
-  } catch {}
-}
-function loadAuthSession() {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  const token = localStorage.getItem('token');
-  return token ? { access_token: token, refresh_token: null, expires_at: null } : null;
-}
-function clearAuthSession() {
-  try {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem('token');
-  } catch {}
-}
-async function restoreSession() {
-  const saved = loadAuthSession();
-  if (!saved?.access_token) return null;
-  // Try current access token
-  let user = await sbGetProfile(saved.access_token);
-  if (user) return { token: saved.access_token, user, session: saved };
-  // Refresh if possible
-  if (saved.refresh_token) {
-    const refreshed = await sbRefresh(saved.refresh_token);
-    if (refreshed?.access_token) {
-      saveAuthSession(refreshed);
-      user = await sbGetProfile(refreshed.access_token);
-      if (user) return { token: refreshed.access_token, user, session: refreshed };
-    }
-  }
-  clearAuthSession();
-  return null;
-}
-
-
-/* ============================================
-   SHARED: Logo, banners, icon maps, themes
-   ============================================ */
-function NexaLogo({ size = 40 }) {
-  return (
-    <img
-      src="/nexastore-icon.png"
-      alt="NexaStore"
-      width={size}
-      height={size}
-      className="rounded-[22%] object-cover flex-shrink-0"
-      style={{ width: size, height: size }}
-    />
-  );
-}
-
-const BANNERS = ['/banner-usdt.png', '/banner-discover.png', '/banner-gaming.png', '/banner-developer.png'];
-
-/* ============================================
-   USDT PAYMENTS + CRYPTO WALLET (client-side)
-   Prices are in USDT. Purchases are tracked in
-   localStorage (and best-effort to a purchases
-   table if it exists on Supabase).
-   ============================================ */
-const WALLET_KEY = 'nexastore_crypto_wallet';
-
-const PURCHASES_KEY = 'nexastore_purchases';
-
-const RECOMMENDED_WALLETS = [
-  { id: 'metamask', name: 'MetaMask', desc: 'Browser + mobile. Best for Polygon USDT on NexaStore', url: 'https://metamask.io/', networks: 'Polygon, Ethereum, L2s', tutorialId: 'metamask-eth-ext', recommended: true },
-  { id: 'trust', name: 'Trust Wallet', desc: 'Mobile-first multi-chain wallet', url: 'https://trustwallet.com/', networks: 'Multi-chain', tutorialId: 'trust-btc-mob', recommended: false },
-  { id: 'coinbase', name: 'Coinbase Wallet', desc: 'Simple onboarding, multi-chain USDT', url: 'https://www.coinbase.com/wallet', networks: 'Multi-chain', tutorialId: 'coinbase-eth-mob', recommended: false },
-  { id: 'binance', name: 'Binance Web3 Wallet', desc: 'Web3 wallet linked to Binance', url: 'https://www.binance.com/en/web3wallet', networks: 'BSC, Multi', tutorialId: null, recommended: false },
-  { id: 'phantom', name: 'Phantom', desc: 'Great UX; mainly Solana (use MetaMask for Polygon)', url: 'https://phantom.app/', networks: 'Solana + more', tutorialId: 'phantom-sol-ext', recommended: false },
-  { id: 'tonkeeper', name: 'Tonkeeper', desc: 'USDT on TON — not used for NexaStore payments', url: 'https://tonkeeper.com/', networks: 'TON', tutorialId: null, recommended: false },
-];
-
-/** Wallet-specific warnings for Polygon USDT checkout */
-function walletCheckoutWarnings(wallet) {
-  const id = (wallet?.provider || wallet?.id || '').toLowerCase();
-  const name = (wallet?.name || '').toLowerCase();
-  if (id.includes('metamask') || name.includes('metamask')) {
-    return [
-      'In MetaMask, open the network menu and select Polygon Mainnet (chain 137).',
-      'Buy or bridge USDT on Polygon — USDT on Ethereum/BSC will not work for this payment.',
-      'Keep a little POL in the same account for gas fees.',
-      'When you pay, confirm the popup in this browser — do not switch networks mid-payment.',
-    ];
-  }
-  if (id.includes('trust') || name.includes('trust')) {
-    return [
-      'In Trust Wallet, set the network to Polygon before buying or sending USDT.',
-      'Only send Polygon USDT. TRC-20 / ERC-20 USDT sent to our address will be lost.',
-      'After buying USDT, return here and use Pay in browser wallet (or copy the deposit address).',
-    ];
-  }
-  if (id.includes('coinbase') || name.includes('coinbase')) {
-    return [
-      'Switch Coinbase Wallet network to Polygon Mainnet.',
-      'Buy USDT on Polygon (not Base/Ethereum) for this store.',
-      'Return here and confirm the in-browser payment request.',
-    ];
-  }
-  if (id.includes('phantom') || name.includes('phantom')) {
-    return [
-      'Phantom is mainly Solana. For NexaStore you need a Polygon-capable wallet (MetaMask recommended).',
-      'If Phantom shows Polygon, still double-check you are sending Polygon USDT only.',
-    ];
-  }
-  return [
-    'Set your wallet network to Polygon Mainnet before buying or sending.',
-    'Only Polygon USDT is accepted. Other networks = lost funds.',
-    'Buy at least the listed USDT amount, plus a little native gas token (POL).',
-    'Come back to NexaStore and tap Continue to Payment / Pay in browser wallet.',
-  ];
-}
-
-
-let _tutorialsCache = null;
-async function loadTutorials() {
-  if (_tutorialsCache) return _tutorialsCache;
-  try {
-    const r = await fetch('/tutorials.json');
-    if (!r.ok) throw new Error('failed');
-    _tutorialsCache = await r.json();
-  } catch {
-    _tutorialsCache = [];
-  }
-  return _tutorialsCache;
-}
-function findTutorial(tutorials, tutorialId, walletName) {
-  if (!tutorials?.length) return null;
-  if (tutorialId) {
-    const hit = tutorials.find(t => t.id === tutorialId);
-    if (hit) return hit;
-  }
-  if (walletName) {
-    const q = walletName.toLowerCase();
-    return tutorials.find(t => (t.walletName || '').toLowerCase().includes(q) || q.includes((t.walletName || '').toLowerCase())) || null;
-  }
-  return null;
-}
-
-
-function getStoredWallet() {
-  try { return JSON.parse(localStorage.getItem(WALLET_KEY) || 'null'); } catch { return null; }
-}
-function setStoredWallet(w) {
-  if (w) localStorage.setItem(WALLET_KEY, JSON.stringify(w));
-  else localStorage.removeItem(WALLET_KEY);
-}
-function getPurchases() {
-  try { return JSON.parse(localStorage.getItem(PURCHASES_KEY) || '{}'); } catch { return {}; }
-}
-function markPurchased(appId, userId) {
-  const key = userId || 'guest';
-  const all = getPurchases();
-  if (!all[key]) all[key] = [];
-  if (!all[key].includes(appId)) all[key].push(appId);
-  localStorage.setItem(PURCHASES_KEY, JSON.stringify(all));
-}
-function hasPurchased(appId, userId) {
-  const key = userId || 'guest';
-  const all = getPurchases();
-  return (all[key] || []).includes(appId);
-}
-
-async function resolvePayoutWallet(app) {
-  try {
-    if (app?.dev_id) {
-      const rows = await sbSelect('profiles', `id=eq.${app.dev_id}&select=payout_wallet,email`);
-      const w = rows?.[0]?.payout_wallet;
-      if (w && String(w).length >= 10) return { address: String(w), source: 'developer' };
+    if (session) {
+      await sbUpdate(
+        'affiliates',
+        { code, code_expires_at: codeExpiresAt },
+        { user_id: profile.id },
+        session
+      ).catch(async () => {
+        await sbInsert(
+          'affiliates',
+          {
+            user_id: profile.id,
+            email: profile.email || null,
+            code,
+            code_expires_at: codeExpiresAt,
+            payout_wallet: next.wallet || null,
+            status: aff.status,
+          },
+          session
+        ).catch(() => {});
+      });
     }
   } catch {}
-  try {
-    const local = localStorage.getItem(`nexastore_payout_${app?.dev_id || ''}`);
-    if (local && local.length >= 10) return { address: local, source: 'developer' };
-  } catch {}
-  return { address: PLATFORM_TREASURY_WALLET, source: 'platform_fallback' };
-}
-
-
-function getVisitorId() {
-  try {
-    let id = localStorage.getItem('nexastore_vid');
-    if (!id) {
-      id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem('nexastore_vid', id);
-    }
-    return id;
-  } catch {
-    return 'anon';
-  }
-}
-
-const LOCAL_VISITS_KEY = 'nexastore_visit_log_v1';
-
-function readLocalVisits() {
-  try {
-    const raw = localStorage.getItem(LOCAL_VISITS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
-function appendLocalVisit(entry) {
-  try {
-    const list = readLocalVisits();
-    list.push(entry);
-    // keep last 2000
-    localStorage.setItem(LOCAL_VISITS_KEY, JSON.stringify(list.slice(-2000)));
-  } catch {}
-}
-
-/** One recorded visit per browser session per calendar day. Always logs locally; tries Supabase too. */
-async function trackStoreVisit(path = '/') {
-  try {
-    const day = new Date().toISOString().slice(0, 10);
-    const flag = `nexastore_visit_${day}`;
-    if (sessionStorage.getItem(flag)) return;
-    sessionStorage.setItem(flag, '1');
-    const entry = {
-      path: String(path || '/').slice(0, 200),
-      visitor_id: getVisitorId(),
-      user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : null,
-      created_at: new Date().toISOString(),
-    };
-    appendLocalVisit(entry);
-    const res = await fetch(`${REST}/store_visits`, {
-      method: 'POST',
-      headers: {
-        apikey: ANON_KEY,
-        Authorization: `Bearer ${ANON_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({
-        path: entry.path,
-        visitor_id: entry.visitor_id,
-        user_agent: entry.user_agent,
-      }),
-    }).catch(() => null);
-    if (res && !res.ok) {
-      // table missing / RLS — local log still has the visit
-      console.warn('[visits] remote insert failed', res.status);
-    }
-  } catch {}
-}
-
-function aggregateVisits(list) {
-  const unique = new Set(list.map(r => r.visitor_id).filter(Boolean));
-  const byDay = {};
-  for (const r of list) {
-    const day = (r.created_at || '').slice(0, 10) || 'unknown';
-    if (!byDay[day]) byDay[day] = { day, visits: 0, visitors: new Set() };
-    byDay[day].visits += 1;
-    if (r.visitor_id) byDay[day].visitors.add(r.visitor_id);
-  }
-  const chart = Object.values(byDay)
-    .map(d => ({ day: d.day, visits: d.visits, visitors: d.visitors.size }))
-    .sort((a, b) => a.day.localeCompare(b.day));
-  return {
-    totalVisits: list.length,
-    uniqueVisitors: unique.size,
-    chart,
-  };
-}
-
-async function fetchVisitStats(session, rangeKey = '7d') {
-  const now = Date.now();
-  const ranges = {
-    '24h': now - 24 * 60 * 60 * 1000,
-    '7d': now - 7 * 24 * 60 * 60 * 1000,
-    '30d': now - 30 * 24 * 60 * 60 * 1000,
-    all: 0,
-  };
-  const sinceMs = ranges[rangeKey] ?? ranges['7d'];
-  const sinceIso = sinceMs ? new Date(sinceMs).toISOString() : null;
-
-  let remote = [];
-  let remoteOk = false;
-  let remoteError = '';
-  try {
-    let qs = 'select=id,visitor_id,path,created_at&order=created_at.desc&limit=5000';
-    if (sinceIso) qs += `&created_at=gte.${encodeURIComponent(sinceIso)}`;
-    const rows = await sbSelect('store_visits', qs, session);
-    remote = rows || [];
-    remoteOk = true;
-  } catch (e) {
-    remoteError = e.message || String(e);
-  }
-
-  let local = readLocalVisits();
-  if (sinceIso) {
-    const t0 = new Date(sinceIso).getTime();
-    local = local.filter(r => new Date(r.created_at || 0).getTime() >= t0);
-  }
-
-  // Prefer remote when available; otherwise local (this admin browser)
-  const list = remoteOk && remote.length >= 0 && !remoteError ? remote : local;
-  // If remote empty but local has data, merge unique by visitor_id+day
-  if (remoteOk && remote.length === 0 && local.length > 0) {
-    const agg = aggregateVisits(local);
-    return { ...agg, ok: true, source: 'local' };
-  }
-  if (!remoteOk) {
-    const agg = aggregateVisits(local);
-    return {
-      ...agg,
-      ok: false,
-      error: remoteError,
-      source: 'local',
-    };
-  }
-  const agg = aggregateVisits(list);
-  return { ...agg, ok: true, source: 'remote' };
-}
-
-
-async function uploadProfileAvatar(file, userId, token) {
-  if (!file || !userId || !token) throw new Error('Missing file or session');
-  if (!file.type?.startsWith('image/')) throw new Error('Please choose an image file');
-  if (file.size > 2 * 1024 * 1024) throw new Error('Image must be under 2 MB');
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-  const path = `${userId}/avatar.${ext}`;
-  // overwrite if exists
-  try {
-    await fetch(`${STORAGEAPI}/object/nexastore-avatars/${path}`, {
-      method: 'DELETE',
-      headers: { apikey: ANON_KEY, authorization: `Bearer ${token}` },
-    });
-  } catch {}
-  await sbUpload('nexastore-avatars', path, file, token);
-  const publicUrl = `${STORAGEAPI}/object/public/nexastore-avatars/${path}?t=${Date.now()}`;
-  try {
-    await sbUpdate('profiles', { avatar_url: publicUrl }, { id: userId }, token);
-  } catch {
-    // column may not exist — still return URL for local use
-  }
-  try {
-    localStorage.setItem(`nexastore_avatar_${userId}`, publicUrl);
-  } catch {}
-  return publicUrl;
-}
-
-function getLocalAvatar(userId) {
-  try {
-    return localStorage.getItem(`nexastore_avatar_${userId}`) || null;
-  } catch {
-    return null;
-  }
+  return next;
 }
 
 function formatPrice(price) {
@@ -2213,11 +1713,21 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
-  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100';
+  const border = dark ? 'border-white/10' : 'border-gray-100';
+  const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
   const [aff, setAff] = useState(null);
   const [wallet, setWallet] = useState('');
   const [busy, setBusy] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState('overview'); // overview | links | earnings | wallet
+
+  const refresh = async () => {
+    const a = await ensureAffiliateForUser(profile, session);
+    setAff(a);
+    setWallet(a?.wallet || '');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -2231,25 +1741,55 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
     return () => { cancelled = true; };
   }, [profile?.id, session]);
 
+  const codeLive = isCodeLive(aff);
+  const codeExpired = aff?.code && isCodeExpired(aff);
   const sales = useMemo(() => {
     if (!aff?.code) return [];
     return loadAttributions().filter((r) => r.code === aff.code);
-  }, [aff?.code]);
+  }, [aff?.code, aff]);
+  // also sales for all historical codes under this user - filter by affiliateUserId
+  const allSales = useMemo(() => {
+    if (!profile?.id) return sales;
+    const byUser = loadAttributions().filter((r) => r.affiliateUserId === profile.id);
+    return byUser.length ? byUser : sales;
+  }, [profile?.id, sales]);
 
-  const chart = useMemo(() => (aff?.code ? affiliateEarningsByDay(aff.code) : []), [aff?.code, sales.length]);
-  const totalCredit = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
-  const pendingPay = sales.filter((r) => r.status === 'pending_payout');
+  const chart = useMemo(() => {
+    const byDay = {};
+    for (const r of allSales) {
+      const day = (r.createdAt || '').slice(0, 10) || 'unknown';
+      if (!byDay[day]) byDay[day] = { day, credit: 0, sales: 0 };
+      byDay[day].credit += parseFloat(r.creditUsdt) || 0;
+      byDay[day].sales += 1;
+    }
+    return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
+  }, [allSales]);
+
+  const totalCredit = allSales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
+  const pendingPay = allSales.filter((r) => r.status === 'pending_payout');
   const status = aff?.status || 'pending';
 
-  const linkHome = typeof window !== 'undefined'
-    ? `${window.location.origin}/?promo=${encodeURIComponent(aff?.code || '')}`
-    : `https://nexastore-baj.pages.dev/?promo=${aff?.code || ''}`;
-  const linkHiNote = typeof window !== 'undefined'
-    ? `${window.location.origin}/app/hi-note/?promo=${encodeURIComponent(aff?.code || '')}`
-    : `https://nexastore-baj.pages.dev/app/hi-note/?promo=${aff?.code || ''}`;
-  const linkAff = typeof window !== 'undefined'
-    ? `${window.location.origin}/affiliates/`
-    : 'https://nexastore-baj.pages.dev/affiliates/';
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nexastore-baj.pages.dev';
+  const code = aff?.code || '';
+  const links = codeLive ? [
+    ['Store home', `${origin}/?promo=${encodeURIComponent(code)}`],
+    ['Hi-Note', `${origin}/app/hi-note/?promo=${encodeURIComponent(code)}`],
+    ['Program rules', `${origin}/affiliates/`],
+  ] : [];
+
+  const onGenerate = async () => {
+    setGenBusy(true);
+    try {
+      const next = await generateAffiliateCodeForUser(profile, session);
+      setAff(next);
+      showToast?.(`Code ${next.code} generated — valid 30 days`, 'success');
+      setTab('links');
+    } catch (e) {
+      showToast?.(e.message || 'Could not generate code', 'error');
+    } finally {
+      setGenBusy(false);
+    }
+  };
 
   const saveWallet = async () => {
     if (!aff) return;
@@ -2279,119 +1819,185 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
     } catch {}
   };
 
-  const statusLabel = {
-    pending: 'Pending approval',
-    active: 'Active',
-    rejected: 'Rejected',
-    blocked: 'Blocked',
-  }[status] || status;
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'links', label: 'Code & links', icon: Share2 },
+    { id: 'earnings', label: 'Earnings', icon: DollarSign },
+    { id: 'wallet', label: 'Wallet', icon: Wallet },
+  ];
+
+  const expiresLabel = aff?.codeExpiresAt
+    ? new Date(aff.codeExpiresAt).toLocaleString()
+    : null;
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={`w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border p-5 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-200'}`}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className={`font-extrabold text-[17px] ${text}`}>Your affiliate dashboard</p>
-            <p className={`text-[12px] ${subtext}`}>Codes, links, and earnings over time</p>
-          </div>
-          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-            <X size={18} className={text} />
-          </button>
+    <div className={`fixed inset-0 z-[120] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${bg} ${border}`}>
+        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className={`font-bold text-[15px] ${text}`}>Affiliate console</p>
+          <p className={`text-[11.5px] ${subtext}`}>Promoter dashboard · codes expire in 30 days</p>
         </div>
+      </div>
 
+      <div className={`flex gap-1 px-4 border-b overflow-x-auto ${border}`}>
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" onClick={() => setTab(id)}
+            className={`flex items-center gap-1.5 px-3 py-3 text-[13px] font-semibold border-b-2 whitespace-nowrap ${tab === id ? 'border-violet-500 text-violet-500' : `border-transparent ${subtext}`}`}>
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-4 max-w-2xl mx-auto space-y-4 pb-16">
         {!aff ? (
           <p className={`text-[13px] ${subtext}`}>Loading…</p>
         ) : (
-          <div className="space-y-4">
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Status</p>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                  status === 'active' ? 'bg-emerald-500/15 text-emerald-600' :
-                  status === 'pending' ? 'bg-amber-500/15 text-amber-700' :
-                  'bg-red-500/15 text-red-600'
-                }`}>{statusLabel}</span>
-              </div>
-              {status === 'pending' && (
-                <p className={`text-[12.5px] mt-2 ${subtext}`}>Your application is waiting for admin approval. You can still copy links; earnings only count after you are <b>Active</b>.</p>
-              )}
-              {status === 'rejected' && (
-                <p className={`text-[12.5px] mt-2 text-red-500`}>Your application was rejected. Contact support if you think this is a mistake.</p>
-              )}
-              {status === 'blocked' && (
-                <p className={`text-[12.5px] mt-2 text-red-500`}>This affiliate account is blocked. Promo codes will not earn credit.</p>
-              )}
-            </div>
-
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Promo code</p>
-              <p className={`text-[28px] font-black tracking-widest mt-1 ${text}`}>{aff.code}</p>
-              <button type="button" onClick={() => copy(aff.code)} className="text-[12px] font-semibold text-violet-600 mt-1">
-                {copied === aff.code ? 'Copied' : 'Copy code'}
-              </button>
-            </div>
-
-            <div className={`rounded-2xl border p-4 space-y-3 ${card}`}>
-              <p className={`font-bold text-[13px] ${text}`}>Copyable links</p>
-              {[
-                ['Store home', linkHome],
-                ['Hi-Note page', linkHiNote],
-                ['Program rules', linkAff],
-              ].map(([label, url]) => (
-                <div key={label} className={`rounded-xl p-2.5 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
-                  <p className={`text-[11px] font-semibold ${subtext}`}>{label}</p>
-                  <p className={`text-[11px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{url}</p>
-                  <button type="button" onClick={() => copy(url)} className="text-[11px] font-bold text-violet-600 mt-1">
-                    {copied === url ? 'Copied' : 'Copy link'}
-                  </button>
+          <>
+            {tab === 'overview' && (
+              <>
+                <div className={`rounded-2xl border p-4 ${card} ${border}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-[11px] font-bold uppercase ${subtext}`}>Account status</p>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                      status === 'active' ? 'bg-emerald-500/15 text-emerald-600' :
+                      status === 'pending' ? 'bg-amber-500/15 text-amber-700' :
+                      'bg-red-500/15 text-red-600'
+                    }`}>{status}</span>
+                  </div>
+                  {status === 'pending' && <p className={`text-[12.5px] mt-2 ${subtext}`}>Waiting for admin approval. You cannot generate a live promo code until accepted.</p>}
+                  {status === 'active' && !codeLive && (
+                    <p className={`text-[12.5px] mt-2 ${subtext}`}>
+                      {codeExpired ? 'Your last code expired. Generate a new one to keep promoting.' : 'No active code yet. Open Code & links and press Generate code.'}
+                    </p>
+                  )}
+                  {codeLive && (
+                    <p className={`text-[12.5px] mt-2 ${subtext}`}>Live code <b className={text}>{aff.code}</b> · expires {expiresLabel}</p>
+                  )}
                 </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className={`rounded-2xl border p-3 ${card}`}>
-                <p className={`text-[11px] ${subtext}`}>Sales attributed</p>
-                <p className={`text-[20px] font-extrabold ${text}`}>{sales.length}</p>
-              </div>
-              <div className={`rounded-2xl border p-3 ${card}`}>
-                <p className={`text-[11px] ${subtext}`}>Total credit (10%)</p>
-                <p className={`text-[20px] font-extrabold text-emerald-500`}>{totalCredit.toFixed(2)} USDT</p>
-              </div>
-            </div>
-
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`font-bold text-[13px] mb-2 ${text}`}>Earnings over time</p>
-              {chart.length === 0 ? (
-                <p className={`text-[12px] ${subtext} py-6 text-center`}>No attributed sales yet.</p>
-              ) : (
-                <div className="h-44 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
-                      <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
-                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Credit']} />
-                      <Bar dataKey="credit" fill="#10b981" radius={[8, 8, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className={`rounded-2xl border p-4 ${card} ${border}`}>
+                    <p className={`text-[11px] ${subtext}`}>Attributed sales</p>
+                    <p className={`text-2xl font-extrabold ${text}`}>{allSales.length}</p>
+                  </div>
+                  <div className={`rounded-2xl border p-4 ${card} ${border}`}>
+                    <p className={`text-[11px] ${subtext}`}>Total credit</p>
+                    <p className="text-2xl font-extrabold text-emerald-500">{totalCredit.toFixed(2)} USDT</p>
+                  </div>
                 </div>
-              )}
-              <p className={`text-[11px] mt-2 ${subtext}`}>{pendingPay.length} sale(s) pending payout. Admin pays on schedule after review.</p>
-            </div>
+                <div className={`rounded-2xl border p-4 ${card} ${border}`}>
+                  <p className={`font-bold text-[13px] mb-2 ${text}`}>Earnings chart</p>
+                  {chart.length === 0 ? (
+                    <p className={`text-[12px] py-8 text-center ${subtext}`}>No earnings yet</p>
+                  ) : (
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chart}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                          <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Credit']} />
+                          <Bar dataKey="credit" fill="#10b981" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
-            <div className={`rounded-2xl border p-4 space-y-2 ${card}`}>
-              <p className={`font-bold text-[13px] ${text}`}>Payout wallet (Polygon USDT)</p>
-              <input
-                value={wallet}
-                onChange={(e) => setWallet(e.target.value)}
-                placeholder="0x…"
-                className={`w-full px-3 py-2 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`}
-              />
-              <button type="button" disabled={busy} onClick={saveWallet} className="w-full py-2.5 rounded-xl font-bold text-[13px] text-white bg-emerald-600 disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save wallet'}
-              </button>
-            </div>
-          </div>
+            {tab === 'links' && (
+              <>
+                <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
+                  <p className={`font-bold text-[14px] ${text}`}>Promo code</p>
+                  {status !== 'active' ? (
+                    <p className={`text-[13px] ${subtext}`}>Admin must Accept your affiliate account before codes are available.</p>
+                  ) : codeLive ? (
+                    <>
+                      <p className={`text-[32px] font-black tracking-widest ${text}`}>{aff.code}</p>
+                      <p className={`text-[12px] ${subtext}`}>Expires {expiresLabel}</p>
+                      <button type="button" onClick={() => copy(aff.code)} className="text-[12px] font-bold text-violet-600">
+                        {copied === aff.code ? 'Copied' : 'Copy code'}
+                      </button>
+                      <p className={`text-[11px] ${subtext}`}>Generate is disabled until this code expires.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className={`text-[13px] ${subtext}`}>
+                        {codeExpired ? 'Previous code expired.' : 'No code yet.'} Click generate to create a new 30-day code.
+                      </p>
+                      {aff.code && codeExpired && (
+                        <p className={`text-[12px] font-mono ${subtext}`}>Last code: {aff.code} (expired)</p>
+                      )}
+                      <button type="button" disabled={genBusy} onClick={onGenerate}
+                        className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 disabled:opacity-50">
+                        {genBusy ? 'Generating…' : 'Generate code'}
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
+                  <p className={`font-bold text-[14px] ${text}`}>Copyable links</p>
+                  {!codeLive ? (
+                    <p className={`text-[12px] ${subtext}`}>Links appear after you have a live (non-expired) code.</p>
+                  ) : links.map(([label, url]) => (
+                    <div key={label} className={`rounded-xl p-3 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
+                      <p className={`text-[11px] font-semibold ${subtext}`}>{label}</p>
+                      <p className={`text-[11px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{url}</p>
+                      <button type="button" onClick={() => copy(url)} className="text-[11px] font-bold text-violet-600 mt-1">
+                        {copied === url ? 'Copied' : 'Copy link'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {tab === 'earnings' && (
+              <div className={`rounded-2xl border p-4 ${card} ${border}`}>
+                <p className={`font-bold text-[14px] mb-1 ${text}`}>Earnings over time</p>
+                <p className={`text-[12px] mb-3 ${subtext}`}>{allSales.length} sales · {totalCredit.toFixed(2)} USDT credit · {pendingPay.length} pending payout</p>
+                {chart.length === 0 ? (
+                  <p className={`text-[12px] py-10 text-center ${subtext}`}>No attributed sales yet</p>
+                ) : (
+                  <div className="h-56 w-full mb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chart}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                        <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                        <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                        <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Credit']} />
+                        <Bar dataKey="credit" fill="#10b981" radius={[8, 8, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                  {allSales.slice().reverse().slice(0, 30).map((r) => (
+                    <li key={r.id} className={`text-[12px] flex justify-between gap-2 ${subtext}`}>
+                      <span className="truncate">{(r.createdAt || '').slice(0, 10)} · {r.appName || 'App'}</span>
+                      <span className="text-emerald-500 font-semibold shrink-0">+{r.creditUsdt} USDT</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {tab === 'wallet' && (
+              <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
+                <p className={`font-bold text-[14px] ${text}`}>Payout wallet</p>
+                <p className={`text-[12px] ${subtext}`}>Polygon USDT address for affiliate credits after admin review.</p>
+                <input value={wallet} onChange={(e) => setWallet(e.target.value)} placeholder="0x…"
+                  className={`w-full px-3 py-2.5 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`} />
+                <button type="button" disabled={busy} onClick={saveWallet}
+                  className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-emerald-600 disabled:opacity-50">
+                  {busy ? 'Saving…' : 'Save wallet'}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
