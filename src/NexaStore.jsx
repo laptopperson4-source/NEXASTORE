@@ -2523,21 +2523,40 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
         {loading ? (
           <p className={`text-[13px] ${subtext}`}>Loading…</p>
         ) : !aff ? (
-          <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
-            <p className={`font-extrabold text-[16px] ${text}`}>Join the affiliate program</p>
-            <p className={`text-[13px] ${subtext}`}>
-              Promote paid NexaStore apps with checkout codes. You earn credit only on confirmed purchases.
-              After you apply, the owner must <b>Accept</b> you before any dashboard or codes are available.
-            </p>
-            <ul className={`text-[12.5px] list-disc pl-5 space-y-1 ${subtext}`}>
-              <li>Pay per confirmed sale (not impressions)</li>
-              <li>Codes only for paid apps, 30-day expiry</li>
-              <li>No dashboard until approved</li>
-            </ul>
-            <button type="button" disabled={applyBusy} onClick={onApply}
-              className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-50">
-              {applyBusy ? 'Submitting…' : 'Apply for affiliate program'}
-            </button>
+          <div className="space-y-4">
+            <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-600">NexaStore affiliates</p>
+              <p className={`font-extrabold text-[20px] leading-tight ${text}`}>Earn when people buy apps you promote</p>
+              <p className={`text-[13px] ${subtext}`}>
+                Share checkout links for paid apps. When a buyer pays with your code, you earn a credit on that sale.
+                No pay-per-view, no fake traffic.
+              </p>
+            </div>
+            <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
+              <p className={`font-bold text-[14px] ${text}`}>Benefits</p>
+              <ul className={`space-y-2.5 text-[13px] ${subtext}`}>
+                <li className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> <span><b className={text}>~10% credit</b> on confirmed paid purchases attributed to your code</span></li>
+                <li className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> <span><b className={text}>Per-app checkout codes</b> for paid listings only (not free apps)</span></li>
+                <li className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> <span><b className={text}>Copyable links</b> you can post on X, groups, or your site</span></li>
+                <li className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> <span><b className={text}>Earnings chart</b> after you are approved</span></li>
+                <li className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> <span><b className={text}>Polygon USDT</b> payout wallet you control</span></li>
+              </ul>
+            </div>
+            <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
+              <p className={`font-bold text-[14px] ${text}`}>How signup works</p>
+              <ol className={`list-decimal pl-5 space-y-1.5 text-[13px] ${subtext}`}>
+                <li>Submit an application with this account</li>
+                <li>Owner reviews you in Affiliate Admin</li>
+                <li>If accepted, your promoter dashboard unlocks</li>
+                <li>Generate codes for paid apps and share links</li>
+              </ol>
+              <p className={`text-[12px] ${subtext}`}>Until you are accepted you will only see a waiting status — no codes and no earnings dashboard.</p>
+              <button type="button" disabled={applyBusy} onClick={onApply}
+                className="w-full py-3.5 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-50">
+                {applyBusy ? 'Submitting…' : 'Sign up for the affiliate program'}
+              </button>
+              <p className={`text-[11px] text-center ${subtext}`}>By applying you agree to promote honestly — no bots or misleading claims.</p>
+            </div>
           </div>
         ) : status === 'pending' ? (
           <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
@@ -3760,6 +3779,23 @@ function AffiliateAdminDashboard({ session, profile, onClose, dark, showToast })
     const idKey = aff.userId || aff.email || aff.code;
     setBusyId(idKey);
     try {
+      if (status === 'rejected') {
+        // Remove the application entirely from admin list + storage
+        if (aff.userId && session) {
+          await sbDelete('affiliates', { user_id: aff.userId }, session).catch(() => {});
+        }
+        const next = loadLocalAffiliates().filter(
+          (a) => !((aff.userId && a.userId === aff.userId) || (aff.email && a.email === aff.email))
+        );
+        saveLocalAffiliates(next);
+        // Drop their codes locally so they cannot keep promoting
+        if (aff.userId) {
+          saveAffiliateCodes(loadAffiliateCodes().filter((c) => c.affiliateUserId !== aff.userId));
+        }
+        await load();
+        showToast?.(`${aff.email || 'Application'} removed`, 'info');
+        return;
+      }
       if (aff.userId && session) {
         await sbUpdate('affiliates', { status }, { user_id: aff.userId }, session).catch(() => {});
       }
@@ -3842,7 +3878,7 @@ function AffiliateAdminDashboard({ session, profile, onClose, dark, showToast })
                 </button>
               ))}
             </div>
-            <p className={`text-[12px] ${subtext}`}>Accept or reject the <b>person</b> (program application). Codes are managed by promoters after they are active.</p>
+            <p className={`text-[12px] ${subtext}`}>Accept the person to unlock their dashboard. <b>Reject &amp; remove</b> deletes their application from this list.</p>
             {filtered.length === 0 ? (
               <p className={`text-[13px] py-8 text-center ${subtext}`}>No applications in this filter.</p>
             ) : filtered.map((a) => {
@@ -3863,7 +3899,7 @@ function AffiliateAdminDashboard({ session, profile, onClose, dark, showToast })
                       <button type="button" disabled={busy || a.status === 'active'} onClick={() => setStatus(a, 'active')}
                         className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40">Accept</button>
                       <button type="button" disabled={busy} onClick={() => setStatus(a, 'rejected')}
-                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500 text-white disabled:opacity-40">Reject</button>
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500 text-white disabled:opacity-40">Reject & remove</button>
                       <button type="button" disabled={busy} onClick={() => setStatus(a, 'blocked')}
                         className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-600 text-white disabled:opacity-40">Block</button>
                     </div>
