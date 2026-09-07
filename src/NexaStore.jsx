@@ -3995,9 +3995,9 @@ function AppDetailModal({ app, session, profile, onClose, onInstall, onOpenAuth,
       } catch {}
       if (app.dev_id) {
         try {
-          const profs = await sbSelect('profiles', `id=eq.${app.dev_id}&select=email,developer_name,company_name`).catch(() => []);
+          const profs = await sbSelect('profiles', `id=eq.${app.dev_id}&select=email,display_name`).catch(() => []);
           if (!cancelled && profs?.[0]) {
-            const nm = profs[0].developer_name || profs[0].company_name || (profs[0].email ? profs[0].email.split('@')[0] : '');
+            const nm = profs[0].display_name || (profs[0].email ? profs[0].email.split('@')[0] : '');
             if (nm) setDevName(nm);
             else {
               const local = getLocalDevProfile(app.dev_id);
