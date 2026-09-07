@@ -62,6 +62,154 @@ async function completeNexaPulseLogin(code) {
 }
 
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
+
+// --- Affiliate / promo codes (pay per confirmed purchase) ---
+const AFF_LOCAL_KEY = 'nexastore_affiliates_v1';
+const AFF_ATTRIB_KEY = 'nexastore_affiliate_attributions_v1';
+const AFF_RATE = 0.10; // 10% of app price credited to affiliate (program budget)
+
+function loadLocalAffiliates() {
+  try {
+    const raw = localStorage.getItem(AFF_LOCAL_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalAffiliates(list) {
+  try {
+    localStorage.setItem(AFF_LOCAL_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function loadAttributions() {
+  try {
+    const raw = localStorage.getItem(AFF_ATTRIB_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAttributions(list) {
+  try {
+    localStorage.setItem(AFF_ATTRIB_KEY, JSON.stringify(list.slice(-500)));
+  } catch {}
+}
+
+function generatePromoCode(seed = '') {
+  const base = (seed || 'PULSE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PULSE';
+  const tail = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return (base + tail).slice(0, 10);
+}
+
+function getPromoFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get('promo') || localStorage.getItem('nexastore_pending_promo') || '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberPromo(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return;
+  try {
+    localStorage.setItem('nexastore_pending_promo', c);
+  } catch {}
+}
+
+function findAffiliateByCode(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  return loadLocalAffiliates().find((a) => a.code === c && a.status !== 'disabled') || null;
+}
+
+function recordAffiliateSale({ code, appId, appName, amountUsdt, buyerId }) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  const aff = findAffiliateByCode(c);
+  if (!aff) return null;
+  if (buyerId && aff.userId && buyerId === aff.userId) return null; // no self-purchase credit
+  const amount = Math.max(0, parseFloat(amountUsdt) || 0);
+  const credit = Math.round(amount * AFF_RATE * 100) / 100;
+  const row = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    code: c,
+    affiliateUserId: aff.userId || null,
+    appId,
+    appName,
+    amountUsdt: amount,
+    creditUsdt: credit,
+    buyerId: buyerId || null,
+    createdAt: new Date().toISOString(),
+    status: 'pending_payout',
+  };
+  const list = loadAttributions();
+  list.push(row);
+  saveAttributions(list);
+  return row;
+}
+
+async function ensureAffiliateForUser(profile, session) {
+  if (!profile?.id) return null;
+  const local = loadLocalAffiliates();
+  let mine = local.find((a) => a.userId === profile.id);
+  if (mine) return mine;
+  // try remote
+  try {
+    if (session) {
+      const rows = await sbSelect('affiliates', `user_id=eq.${profile.id}&select=*&limit=1`, session);
+      if (rows?.[0]) {
+        mine = {
+          userId: rows[0].user_id,
+          email: rows[0].email || profile.email,
+          code: rows[0].code,
+          wallet: rows[0].payout_wallet || '',
+          status: rows[0].status || 'active',
+          createdAt: rows[0].created_at,
+        };
+        if (!local.find((a) => a.userId === profile.id)) {
+          local.push(mine);
+          saveLocalAffiliates(local);
+        }
+        return mine;
+      }
+    }
+  } catch {}
+  const code = generatePromoCode((profile.email || 'NEXA').split('@')[0]);
+  mine = {
+    userId: profile.id,
+    email: profile.email || '',
+    code,
+    wallet: profile.payout_wallet || '',
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  };
+  local.push(mine);
+  saveLocalAffiliates(local);
+  try {
+    if (session) {
+      await sbInsert(
+        'affiliates',
+        {
+          user_id: profile.id,
+          email: profile.email || null,
+          code: mine.code,
+          payout_wallet: mine.wallet || null,
+          status: 'active',
+        },
+        session
+      );
+    }
+  } catch {}
+  return mine;
+}
+
+
 const PAYOUT_MODE = "direct";
 
 async function sbSelect(table, qs, token) {
@@ -1641,6 +1789,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const [order, setOrder] = useState(null);
   const [copied, setCopied] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
+  const [promoCode, setPromoCode] = useState(() => (getPromoFromUrl() || '').toUpperCase());
   const [firstTime] = useState(() => {
     try { return !localStorage.getItem('nexastore_paid_once'); } catch { return true; }
   });
@@ -1678,10 +1827,19 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           clearInterval(pollRef.current);
           setStage('done');
           try { localStorage.setItem('nexastore_paid_once', '1'); } catch {}
+                    if (promoCode) {
+            rememberPromo(promoCode);
+            recordAffiliateSale({
+              code: promoCode,
+              appId: app.id,
+              appName: app.name,
+              amountUsdt: amount || lockedPrice,
+              buyerId: profile?.id,
+            });
+          }
           if (session && profile) {
             markPurchased(app.id, profile.id);
-            sbInsert('purchases', {
-              app_id: app.id,
+            sbInsert('purchases', {     app_id: app.id,
               user_id: profile.id,
               amount_usdt: Number(amount || lockedPrice),
               order_id: orderId,
@@ -1812,6 +1970,22 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   <p className={`text-[11px] text-right ${subtext}`}>
                     Network<br /><span className="text-purple-400 font-medium">Polygon</span>
                   </p>
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-semibold mb-1 ${subtext}`}>Promo code (optional)</label>
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => {
+                      const v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+                      setPromoCode(v);
+                      rememberPromo(v);
+                    }}
+                    placeholder="e.g. PULSE7X"
+                    className={`w-full px-3 py-2 rounded-xl text-[13px] font-mono tracking-wide focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? 'bg-white/10 text-white placeholder-slate-500 border border-white/10' : 'bg-white border border-gray-200 text-gray-900'}`}
+                  />
+                  <p className={`text-[10.5px] mt-1 ${subtext}`}>From an affiliate link or promoter. Does not change the price.</p>
                 </div>
 
                 {firstTime && (
@@ -2017,7 +2191,146 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 }
 
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, dark }) {
+
+function AffiliateDashboard({ session, profile, onClose, dark, showToast }) {
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const subtext = dark ? 'text-slate-400' : 'text-gray-500';
+  const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200';
+  const [aff, setAff] = useState(null);
+  const [wallet, setWallet] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const a = await ensureAffiliateForUser(profile, session);
+      if (!cancelled) {
+        setAff(a);
+        setWallet(a?.wallet || '');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.id, session]);
+
+  const sales = useMemo(() => {
+    if (!aff?.code) return [];
+    return loadAttributions().filter((r) => r.code === aff.code);
+  }, [aff?.code, aff]);
+
+  const totalCredit = sales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
+  const pending = sales.filter((r) => r.status === 'pending_payout');
+  const link = typeof window !== 'undefined'
+    ? `${window.location.origin}/?promo=${encodeURIComponent(aff?.code || '')}`
+    : `https://nexastore-baj.pages.dev/?promo=${aff?.code || ''}`;
+
+  const saveWallet = async () => {
+    if (!aff) return;
+    setBusy(true);
+    try {
+      const list = loadLocalAffiliates().map((a) =>
+        a.userId === profile.id ? { ...a, wallet: wallet.trim() } : a
+      );
+      saveLocalAffiliates(list);
+      setAff((x) => ({ ...x, wallet: wallet.trim() }));
+      if (session) {
+        await sbUpdate('affiliates', { payout_wallet: wallet.trim() }, { user_id: profile.id }, session).catch(() => {});
+      }
+      showToast?.('Payout wallet saved', 'success');
+    } catch (e) {
+      showToast?.(e.message || 'Save failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (val) => {
+    try {
+      await navigator.clipboard.writeText(val);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border p-5 ${dark ? 'bg-[#0a0e27] border-white/10' : 'bg-white border-gray-200'}`}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className={`font-extrabold text-[17px] ${text}`}>Affiliate dashboard</p>
+            <p className={`text-[12px] ${subtext}`}>Promo code · pay per confirmed sale only</p>
+          </div>
+          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+            <X size={18} className={text} />
+          </button>
+        </div>
+
+        {!aff ? (
+          <p className={`text-[13px] ${subtext}`}>Setting up your code…</p>
+        ) : (
+          <div className="space-y-4">
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>Your promo code</p>
+              <p className={`text-[28px] font-black tracking-widest mt-1 ${text}`}>{aff.code}</p>
+              <p className={`text-[12px] mt-2 ${subtext}`}>Share link:</p>
+              <p className={`text-[12px] font-mono break-all ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{link}</p>
+              <button type="button" onClick={() => copy(link)} className="mt-2 text-[12px] font-semibold text-violet-600">
+                {copied ? 'Copied' : 'Copy link'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className={`rounded-2xl border p-3 ${card}`}>
+                <p className={`text-[11px] ${subtext}`}>Attributed sales</p>
+                <p className={`text-[20px] font-extrabold ${text}`}>{sales.length}</p>
+              </div>
+              <div className={`rounded-2xl border p-3 ${card}`}>
+                <p className={`text-[11px] ${subtext}`}>Credit (10%)</p>
+                <p className={`text-[20px] font-extrabold text-emerald-500`}>{totalCredit.toFixed(2)} USDT</p>
+              </div>
+            </div>
+
+            <div className={`rounded-2xl border p-4 space-y-2 ${card}`}>
+              <p className={`font-bold text-[13px] ${text}`}>Payout wallet (Polygon USDT)</p>
+              <input
+                value={wallet}
+                onChange={(e) => setWallet(e.target.value)}
+                placeholder="0x…"
+                className={`w-full px-3 py-2 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`}
+              />
+              <button type="button" disabled={busy} onClick={saveWallet} className="w-full py-2.5 rounded-xl font-bold text-[13px] text-white bg-emerald-600 disabled:opacity-50">
+                {busy ? 'Saving…' : 'Save wallet'}
+              </button>
+              <p className={`text-[11px] ${subtext}`}>{pending.length} sale(s) pending payout review. Paid manually on a schedule while the program is early.</p>
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${card}`}>
+              <p className={`font-bold text-[13px] mb-2 ${text}`}>Recent attributions</p>
+              {sales.length === 0 ? (
+                <p className={`text-[12px] ${subtext}`}>None yet. Share your code on X; buyers enter it at checkout or use your link.</p>
+              ) : (
+                <ul className="space-y-2 max-h-40 overflow-y-auto">
+                  {sales.slice().reverse().slice(0, 20).map((r) => (
+                    <li key={r.id} className={`text-[12px] flex justify-between gap-2 ${subtext}`}>
+                      <span className="truncate">{r.appName || 'App'} · {r.amountUsdt} USDT</span>
+                      <span className="text-emerald-500 font-semibold shrink-0">+{r.creditUsdt}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <a href="/affiliates/" target="_blank" rel="noopener noreferrer" className={`block text-center text-[12px] font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>
+              Program rules →
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, onOpenAffiliate, dark }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarErr, setAvatarErr] = useState('');
@@ -2219,6 +2532,14 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
             <ChevronRight size={17} className={subtext} />
           </button>
         )}
+        <button type="button" onClick={onOpenAffiliate}
+          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
+          <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+            <DollarSign size={18} className="text-emerald-500" /> Affiliate dashboard
+          </span>
+          <ChevronRight size={17} className={subtext} />
+        </button>
+
         <div className={`rounded-2xl border p-4 ${card}`}>
           <p className={`text-[12px] font-bold uppercase tracking-wider mb-2 ${subtext}`}>Trust &amp; policies</p>
           <div className="flex flex-wrap gap-2">
@@ -2228,6 +2549,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
               ['Terms', '/terms/'],
               ['Privacy', '/privacy/'],
               ['Contact', '/contact/'],
+              ['Affiliates', '/affiliates/'],
             ].map(([label, href]) => (
               <a key={href} href={href} target="_blank" rel="noopener noreferrer"
                 className={`text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-white/10 text-slate-200' : 'bg-white border border-gray-200 text-gray-700'}`}>
@@ -3753,7 +4075,7 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
   const dark = false;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -3936,6 +4258,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                 <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Profile</h2>
                 <ProfileView
                   onProfileUpdated={onProfileUpdated}
+                  onOpenAffiliate={onOpenAffiliate}
                   session={session}
                   profile={profile}
                   wallet={wallet}
@@ -4020,7 +4343,7 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated }) {
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
   const dark = false;
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -4257,6 +4580,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
           <h2 className="text-[16px] font-extrabold text-white mb-4">Profile</h2>
           <ProfileView
                   onProfileUpdated={onProfileUpdated}
+                  onOpenAffiliate={onOpenAffiliate}
             session={session}
             profile={profile}
             wallet={wallet}
@@ -4313,6 +4637,7 @@ export default function NexaStore() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAffiliateDash, setShowAffiliateDash] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [selectedApp, setSelectedApp] = useState(null);
 
@@ -4328,6 +4653,8 @@ export default function NexaStore() {
 
   useEffect(() => {
     trackStoreVisit(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/');
+    const incomingPromo = getPromoFromUrl();
+    if (incomingPromo) rememberPromo(incomingPromo);
   }, []);
 
   useEffect(() => {
@@ -4541,6 +4868,7 @@ export default function NexaStore() {
     },
     onOpenTutorials: openTutorialHub,
     onProfileUpdated: setProfile,
+    onOpenAffiliate: () => setShowAffiliateDash(true),
     onOpenTutorial: openTutorialById,
   };
   void ownedTick;
@@ -4550,6 +4878,9 @@ export default function NexaStore() {
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
+      {showAffiliateDash && session && profile && (
+        <AffiliateDashboard session={session} profile={profile} onClose={() => setShowAffiliateDash(false)} dark={false} showToast={showToast} />
+      )}
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
