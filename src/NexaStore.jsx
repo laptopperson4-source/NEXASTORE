@@ -11,8 +11,13 @@ const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 async function sbSelect(table, qs, token) {
   const url = `${REST}/${table}?${qs}`;
-  const opts = { headers: { "apikey": ANON_KEY } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
+  const opts = {
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${token || ANON_KEY}`,
+      Accept: 'application/json',
+    },
+  };
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -221,10 +226,24 @@ function clearAuthSession() {
 async function restoreSession() {
   const saved = loadAuthSession();
   if (!saved?.access_token) return null;
-  // Try current access token
+  const now = Math.floor(Date.now() / 1000);
+  const expired = saved.expires_at && Number(saved.expires_at) < (now + 60);
+
+  // Prefer refresh when token is expired/near-expiry
+  if (expired && saved.refresh_token) {
+    const refreshed = await sbRefresh(saved.refresh_token);
+    if (refreshed?.access_token) {
+      saveAuthSession(refreshed);
+      const user = await sbGetProfile(refreshed.access_token);
+      if (user) return { token: refreshed.access_token, user, session: refreshed };
+    }
+    clearAuthSession();
+    return null;
+  }
+
   let user = await sbGetProfile(saved.access_token);
   if (user) return { token: saved.access_token, user, session: saved };
-  // Refresh if possible
+
   if (saved.refresh_token) {
     const refreshed = await sbRefresh(saved.refresh_token);
     if (refreshed?.access_token) {
@@ -917,8 +936,9 @@ function mergeDevProfile(profile) {
   const localAvatar = getLocalAvatar(profile.id);
   return {
     ...profile,
-    developer_name: profile.developer_name || local?.developer_name || null,
+    developer_name: profile.developer_name || profile.display_name || local?.developer_name || null,
     company_name: profile.company_name || local?.company_name || null,
+    display_name: profile.display_name || profile.developer_name || local?.developer_name || null,
     is_developer: profile.is_developer || local?.is_developer || false,
     avatar_url: profile.avatar_url || localAvatar || null,
   };
@@ -938,9 +958,9 @@ async function enrichAppsWithDevelopers(apps) {
   if (!ids.length) return apps;
   let byId = {};
   try {
-    const profs = await sbSelect('profiles', `id=in.(${ids.join(',')})&select=id,email,developer_name,company_name`);
+    const profs = await sbSelect('profiles', `id=in.(${ids.join(',')})&select=id,email,display_name`);
     for (const pr of (profs || [])) {
-      byId[pr.id] = pr.developer_name || pr.company_name || (pr.email ? pr.email.split('@')[0] : null);
+      byId[pr.id] = pr.display_name || (pr.email ? pr.email.split('@')[0] : null);
     }
   } catch {
     for (const id of ids) {
@@ -3022,7 +3042,8 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
       };
       setLocalDevProfile(profile.id, payload);
       try {
-        await sbUpdate('profiles', payload, { id: profile.id }, session);
+        // DB schema uses display_name (not developer_name/company_name columns)
+        await sbUpdate('profiles', { display_name: name }, { id: profile.id }, session);
       } catch {
         // Column may not exist yet on Supabase — local profile still works
       }
