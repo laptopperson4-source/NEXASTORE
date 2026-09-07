@@ -845,13 +845,23 @@ async function ensureAffiliateForUser(profile, session) {
       }
     }
   } catch {}
-  mine = {
+  // Do not auto-apply — user must click Apply
+  return null;
+}
+
+/** Explicit signup for the affiliate program (pending until owner accepts). */
+async function applyAffiliateForUser(profile, session) {
+  if (!profile?.id) throw new Error('Sign in first');
+  const existing = await ensureAffiliateForUser(profile, session);
+  if (existing) return existing;
+  const mine = {
     userId: profile.id,
     email: profile.email || '',
     wallet: profile.payout_wallet || '',
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
+  const local = loadLocalAffiliates();
   local.push(mine);
   saveLocalAffiliates(local);
   try {
@@ -868,14 +878,12 @@ async function ensureAffiliateForUser(profile, session) {
         session
       );
     }
-  } catch {}
+  } catch (e) {
+    // still keep local application
+  }
   return mine;
 }
 
-/**
- * Generate a checkout promo code for ONE paid app.
- * Only after admin approval; only if no live code exists for that app.
- */
 async function generateAffiliateCodeForUser(profile, session, app) {
   const aff = await ensureAffiliateForUser(profile, session);
   if (!aff) throw new Error('Affiliate account missing');
@@ -2392,11 +2400,13 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
   const border = dark ? 'border-white/10' : 'border-gray-100';
   const bg = dark ? 'bg-[#0a0e27]' : 'bg-white';
   const [aff, setAff] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [applyBusy, setApplyBusy] = useState(false);
   const [wallet, setWallet] = useState('');
   const [busy, setBusy] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [tab, setTab] = useState('overview'); // overview | links | earnings | wallet
+  const [tab, setTab] = useState('overview');
   const [selectedAppId, setSelectedAppId] = useState('');
   const [myCodes, setMyCodes] = useState([]);
 
@@ -2405,31 +2415,31 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     setMyCodes(loadAffiliateCodes().filter((c) => c.affiliateUserId === profile.id));
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const reload = async () => {
+    setLoading(true);
+    try {
       const a = await ensureAffiliateForUser(profile, session);
-      if (!cancelled) {
-        setAff(a);
-        setWallet(a?.wallet || '');
-        refreshCodes();
-        if (paidApps.length && !selectedAppId) {
-          setSelectedAppId(paidApps[0].id);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
+      setAff(a);
+      setWallet(a?.wallet || '');
+      refreshCodes();
+      if (paidApps.length && !selectedAppId) setSelectedAppId(paidApps[0].id);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
   }, [profile?.id, session, paidApps.length]);
 
+  const status = aff?.status || null;
   const selectedApp = paidApps.find((a) => a.id === selectedAppId) || null;
   const liveForApp = selectedApp && profile?.id ? getLiveCodeForApp(profile.id, selectedApp.id) : null;
-  const codeLive = !!liveForApp;
-
   const allSales = useMemo(() => {
     if (!profile?.id) return [];
     return loadAttributions().filter((r) => r.affiliateUserId === profile.id);
-  }, [profile?.id, myCodes.length]);
-
+  }, [profile?.id, myCodes.length, aff?.status]);
+  const totalCredit = allSales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
   const chart = useMemo(() => {
     const byDay = {};
     for (const r of allSales) {
@@ -2440,12 +2450,20 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     }
     return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
   }, [allSales]);
-
-  const totalCredit = allSales.reduce((s, r) => s + (parseFloat(r.creditUsdt) || 0), 0);
-  const pendingPay = allSales.filter((r) => r.status === 'pending_payout');
-  const status = aff?.status || 'pending';
-
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nexastore-baj.pages.dev';
+
+  const onApply = async () => {
+    setApplyBusy(true);
+    try {
+      const a = await applyAffiliateForUser(profile, session);
+      setAff(a);
+      showToast?.('Application submitted — waiting for approval', 'success');
+    } catch (e) {
+      showToast?.(e.message || 'Could not apply', 'error');
+    } finally {
+      setApplyBusy(false);
+    }
+  };
 
   const onGenerate = async () => {
     setGenBusy(true);
@@ -2489,17 +2507,6 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     } catch {}
   };
 
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'links', label: 'Code & links', icon: Share2 },
-    { id: 'earnings', label: 'Earnings', icon: DollarSign },
-    { id: 'wallet', label: 'Wallet', icon: Wallet },
-  ];
-
-  const expiresLabel = aff?.codeExpiresAt
-    ? new Date(aff.codeExpiresAt).toLocaleString()
-    : null;
-
   return (
     <div className={`fixed inset-0 z-[120] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${bg} ${border}`}>
@@ -2507,43 +2514,78 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
           <ArrowLeft size={20} />
         </button>
         <div className="min-w-0 flex-1">
-          <p className={`font-bold text-[15px] ${text}`}>Affiliate console</p>
-          <p className={`text-[11.5px] ${subtext}`}>Promoter dashboard · codes expire in 30 days</p>
+          <p className={`font-bold text-[15px] ${text}`}>Affiliate program</p>
+          <p className={`text-[11.5px] ${subtext}`}>Apply · wait for approval · then codes &amp; earnings</p>
         </div>
       </div>
 
-      <div className={`flex gap-1 px-4 border-b overflow-x-auto ${border}`}>
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" onClick={() => setTab(id)}
-            className={`flex items-center gap-1.5 px-3 py-3 text-[13px] font-semibold border-b-2 whitespace-nowrap ${tab === id ? 'border-violet-500 text-violet-500' : `border-transparent ${subtext}`}`}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-      </div>
-
       <div className="p-4 max-w-2xl mx-auto space-y-4 pb-16">
-        {!aff ? (
+        {loading ? (
           <p className={`text-[13px] ${subtext}`}>Loading…</p>
+        ) : !aff ? (
+          <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
+            <p className={`font-extrabold text-[16px] ${text}`}>Join the affiliate program</p>
+            <p className={`text-[13px] ${subtext}`}>
+              Promote paid NexaStore apps with checkout codes. You earn credit only on confirmed purchases.
+              After you apply, the owner must <b>Accept</b> you before any dashboard or codes are available.
+            </p>
+            <ul className={`text-[12.5px] list-disc pl-5 space-y-1 ${subtext}`}>
+              <li>Pay per confirmed sale (not impressions)</li>
+              <li>Codes only for paid apps, 30-day expiry</li>
+              <li>No dashboard until approved</li>
+            </ul>
+            <button type="button" disabled={applyBusy} onClick={onApply}
+              className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-50">
+              {applyBusy ? 'Submitting…' : 'Apply for affiliate program'}
+            </button>
+          </div>
+        ) : status === 'pending' ? (
+          <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700">Pending approval</span>
+            <p className={`font-extrabold text-[16px] ${text}`}>Application received</p>
+            <p className={`text-[13px] ${subtext}`}>
+              Your request is waiting for the store owner. You do <b>not</b> have an affiliate dashboard or promo codes until you are accepted.
+            </p>
+            <p className={`text-[12px] ${subtext}`}>Email: {aff.email || profile.email}</p>
+            <button type="button" onClick={reload} className={`w-full py-2.5 rounded-xl text-[13px] font-semibold ${dark ? 'bg-white/10' : 'bg-gray-100'}`}>
+              Check status
+            </button>
+          </div>
+        ) : status === 'rejected' || status === 'blocked' ? (
+          <div className={`rounded-2xl border p-5 space-y-2 ${card} ${border}`}>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-red-500/15 text-red-600">{status}</span>
+            <p className={`font-extrabold text-[16px] ${text}`}>Not approved</p>
+            <p className={`text-[13px] ${subtext}`}>
+              {status === 'blocked' ? 'This affiliate account is blocked.' : 'Your application was rejected.'}
+              {' '}Contact support if you need more information.
+            </p>
+          </div>
         ) : (
           <>
+            <div className={`flex gap-1 border-b overflow-x-auto -mx-4 px-4 ${border}`}>
+              {[
+                { id: 'overview', label: 'Overview', icon: BarChart3 },
+                { id: 'links', label: 'Code & links', icon: Share2 },
+                { id: 'earnings', label: 'Earnings', icon: DollarSign },
+                { id: 'wallet', label: 'Wallet', icon: Wallet },
+              ].map(({ id, label, icon: Icon }) => (
+                <button key={id} type="button" onClick={() => setTab(id)}
+                  className={`flex items-center gap-1.5 px-3 py-3 text-[13px] font-semibold border-b-2 whitespace-nowrap ${tab === id ? 'border-violet-500 text-violet-500' : `border-transparent ${subtext}`}`}>
+                  <Icon size={14} /> {label}
+                </button>
+              ))}
+            </div>
+
             {tab === 'overview' && (
               <>
                 <div className={`rounded-2xl border p-4 ${card} ${border}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className={`text-[11px] font-bold uppercase ${subtext}`}>Account status</p>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                      status === 'active' ? 'bg-emerald-500/15 text-emerald-600' :
-                      status === 'pending' ? 'bg-amber-500/15 text-amber-700' :
-                      'bg-red-500/15 text-red-600'
-                    }`}>{status}</span>
-                  </div>
-                  {status === 'pending' && <p className={`text-[12.5px] mt-2 ${subtext}`}>Waiting for admin approval. You cannot generate a live promo code until accepted.</p>}
-                  {status === 'active' && !myCodes.some((c) => !isCodeExpired(c)) && (
-                    <p className={`text-[12.5px] mt-2 ${subtext}`}>No live codes. Open Code & links, pick a paid app, then Generate.</p>
-                  )}
-                  {myCodes.some((c) => !isCodeExpired(c)) && (
-                    <p className={`text-[12.5px] mt-2 ${subtext}`}>{myCodes.filter((c) => !isCodeExpired(c)).length} live app code(s). Manage under Code & links.</p>
-                  )}
+                  <p className={`text-[11px] font-bold uppercase ${subtext}`}>Status</p>
+                  <p className="text-[13px] font-bold text-emerald-600 mt-1">Active</p>
+                  <p className={`text-[12.5px] mt-2 ${subtext}`}>
+                    {myCodes.some((c) => !isCodeExpired(c))
+                      ? `${myCodes.filter((c) => !isCodeExpired(c)).length} live code(s). Manage under Code & links.`
+                      : 'No live codes yet. Open Code & links, pick a paid app, Generate.'}
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className={`rounded-2xl border p-4 ${card} ${border}`}>
@@ -2580,19 +2622,12 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
               <>
                 <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
                   <p className={`font-bold text-[14px] ${text}`}>Checkout codes (paid apps only)</p>
-                  <p className={`text-[12px] ${subtext}`}>Each code unlocks credit only when a buyer pays for that specific app.</p>
-                  {status !== 'active' ? (
-                    <p className={`text-[13px] ${subtext}`}>Admin must Accept you before you can generate codes.</p>
-                  ) : paidApps.length === 0 ? (
-                    <p className={`text-[13px] ${subtext}`}>No paid apps in the catalog right now.</p>
+                  {paidApps.length === 0 ? (
+                    <p className={`text-[13px] ${subtext}`}>No paid apps in the catalog.</p>
                   ) : (
                     <>
-                      <label className={`block text-[11px] font-semibold ${subtext}`}>App</label>
-                      <select
-                        value={selectedAppId}
-                        onChange={(e) => setSelectedAppId(e.target.value)}
-                        className={`w-full px-3 py-2.5 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`}
-                      >
+                      <select value={selectedAppId} onChange={(e) => setSelectedAppId(e.target.value)}
+                        className={`w-full px-3 py-2.5 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`}>
                         {paidApps.map((a) => (
                           <option key={a.id} value={a.id}>{a.name} · {formatPrice(a.price)}</option>
                         ))}
@@ -2604,7 +2639,6 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
                           <button type="button" onClick={() => copy(liveForApp.code)} className="text-[12px] font-bold text-violet-600">
                             {copied === liveForApp.code ? 'Copied' : 'Copy code'}
                           </button>
-                          <p className={`text-[11px] ${subtext}`}>Generate stays off until this app's code expires.</p>
                         </>
                       ) : (
                         <button type="button" disabled={genBusy || !selectedApp} onClick={onGenerate}
@@ -2624,15 +2658,12 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
                     const appLink = `${origin}/?app=${encodeURIComponent(c.appId)}&promo=${encodeURIComponent(c.code)}`;
                     return (
                       <div key={c.code + c.appId} className={`rounded-xl p-3 ${dark ? 'bg-black/30' : 'bg-gray-50'}`}>
-                        <p className={`font-bold text-[13px] ${text}`}>{c.code} <span className={`text-[11px] font-semibold ${live ? 'text-emerald-500' : 'text-red-500'}`}>{live ? 'live' : 'expired'}</span></p>
-                        <p className={`text-[11px] ${subtext}`}>{c.appName} · exp {new Date(c.expiresAt).toLocaleDateString()}</p>
+                        <p className={`font-bold text-[13px] ${text}`}>{c.code} <span className={`text-[11px] ${live ? 'text-emerald-500' : 'text-red-500'}`}>{live ? 'live' : 'expired'}</span></p>
+                        <p className={`text-[11px] ${subtext}`}>{c.appName}</p>
                         {live && (
-                          <>
-                            <p className={`text-[10px] font-mono break-all mt-1 ${dark ? 'text-violet-300' : 'text-violet-700'}`}>{appLink}</p>
-                            <button type="button" onClick={() => copy(appLink)} className="text-[11px] font-bold text-violet-600 mt-1">
-                              {copied === appLink ? 'Copied' : 'Copy checkout link'}
-                            </button>
-                          </>
+                          <button type="button" onClick={() => copy(appLink)} className="text-[11px] font-bold text-violet-600 mt-1">
+                            {copied === appLink ? 'Copied' : 'Copy checkout link'}
+                          </button>
                         )}
                       </div>
                     );
@@ -2644,7 +2675,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
             {tab === 'earnings' && (
               <div className={`rounded-2xl border p-4 ${card} ${border}`}>
                 <p className={`font-bold text-[14px] mb-1 ${text}`}>Earnings over time</p>
-                <p className={`text-[12px] mb-3 ${subtext}`}>{allSales.length} sales · {totalCredit.toFixed(2)} USDT credit · {pendingPay.length} pending payout</p>
+                <p className={`text-[12px] mb-3 ${subtext}`}>{allSales.length} sales · {totalCredit.toFixed(2)} USDT credit</p>
                 {chart.length === 0 ? (
                   <p className={`text-[12px] py-10 text-center ${subtext}`}>No attributed sales yet</p>
                 ) : (
@@ -2660,21 +2691,12 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
                     </ResponsiveContainer>
                   </div>
                 )}
-                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                  {allSales.slice().reverse().slice(0, 30).map((r) => (
-                    <li key={r.id} className={`text-[12px] flex justify-between gap-2 ${subtext}`}>
-                      <span className="truncate">{(r.createdAt || '').slice(0, 10)} · {r.appName || 'App'}</span>
-                      <span className="text-emerald-500 font-semibold shrink-0">+{r.creditUsdt} USDT</span>
-                    </li>
-                  ))}
-                </ul>
               </div>
             )}
 
             {tab === 'wallet' && (
               <div className={`rounded-2xl border p-4 space-y-3 ${card} ${border}`}>
                 <p className={`font-bold text-[14px] ${text}`}>Payout wallet</p>
-                <p className={`text-[12px] ${subtext}`}>Polygon USDT address for affiliate credits after admin review.</p>
                 <input value={wallet} onChange={(e) => setWallet(e.target.value)} placeholder="0x…"
                   className={`w-full px-3 py-2.5 rounded-xl text-[13px] ${dark ? 'bg-black/30 text-white border border-white/10' : 'bg-gray-50 border border-gray-200'}`} />
                 <button type="button" disabled={busy} onClick={saveWallet}
