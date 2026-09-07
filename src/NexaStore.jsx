@@ -530,24 +530,54 @@ async function uploadProfileAvatar(file, userId, token) {
   if (file.size > 2 * 1024 * 1024) throw new Error('Image must be under 2 MB');
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
   const path = `${userId}/avatar.${ext}`;
-  // overwrite if exists
-  try {
-    await fetch(`${STORAGEAPI}/object/nexastore-avatars/${path}`, {
-      method: 'DELETE',
-      headers: { apikey: ANON_KEY, authorization: `Bearer ${token}` },
+
+  const saveLocalOnly = async (reason) => {
+    // Device-only fallback when storage bucket is missing
+    if (file.size > 400 * 1024) {
+      throw new Error(
+        'Cloud photo storage is not set up yet (bucket missing). Use an image under 400 KB, or create the nexastore-avatars bucket in Supabase Storage.'
+      );
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read image'));
+      reader.readAsDataURL(file);
     });
-  } catch {}
-  await sbUpload('nexastore-avatars', path, file, token);
-  const publicUrl = `${STORAGEAPI}/object/public/nexastore-avatars/${path}?t=${Date.now()}`;
+    try {
+      localStorage.setItem(`nexastore_avatar_${userId}`, dataUrl);
+    } catch {
+      throw new Error('Could not save photo on this device (storage full). Try a smaller image.');
+    }
+    try {
+      await sbUpdate('profiles', { avatar_url: null }, { id: userId }, token);
+    } catch {}
+    return dataUrl;
+  };
+
   try {
-    await sbUpdate('profiles', { avatar_url: publicUrl }, { id: userId }, token);
-  } catch {
-    // column may not exist — still return URL for local use
+    try {
+      await fetch(`${STORAGEAPI}/object/nexastore-avatars/${path}`, {
+        method: 'DELETE',
+        headers: { apikey: ANON_KEY, authorization: `Bearer ${token}` },
+      });
+    } catch {}
+    await sbUpload('nexastore-avatars', path, file, token);
+    const publicUrl = `${STORAGEAPI}/object/public/nexastore-avatars/${path}?t=${Date.now()}`;
+    try {
+      await sbUpdate('profiles', { avatar_url: publicUrl }, { id: userId }, token);
+    } catch {}
+    try {
+      localStorage.setItem(`nexastore_avatar_${userId}`, publicUrl);
+    } catch {}
+    return publicUrl;
+  } catch (e) {
+    const msg = String(e?.message || e || '');
+    if (/NoSuchBucket|Bucket not found|404/i.test(msg)) {
+      return saveLocalOnly('bucket');
+    }
+    throw new Error(msg.includes('{') ? 'Could not upload photo. Check storage bucket setup.' : msg);
   }
-  try {
-    localStorage.setItem(`nexastore_avatar_${userId}`, publicUrl);
-  } catch {}
-  return publicUrl;
 }
 
 function getLocalAvatar(userId) {
@@ -2677,7 +2707,19 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
       const next = { ...profile, avatar_url: url };
       onProfileUpdated?.(next);
     } catch (err) {
-      setAvatarErr(err.message || 'Could not upload avatar');
+      const raw = err?.message || 'Could not upload avatar';
+      let nice = raw;
+      try {
+        if (raw.trim().startsWith('{')) {
+          const j = JSON.parse(raw);
+          if (j?.code === 'NoSuchBucket' || /Bucket not found/i.test(j?.message || '')) {
+            nice = 'Photo storage bucket missing. Saved on this device only if the image is small — or create nexastore-avatars in Supabase Storage.';
+          } else {
+            nice = j.message || j.error || raw;
+          }
+        }
+      } catch {}
+      setAvatarErr(nice);
     } finally {
       setAvatarBusy(false);
     }
