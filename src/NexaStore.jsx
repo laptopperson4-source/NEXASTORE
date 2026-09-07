@@ -8,6 +8,59 @@ const REST = `${SUPABASE_URL}/rest/v1`;
 const STORAGEAPI = `${SUPABASE_URL}/storage/v1`;
 const AUTHAPI = `${SUPABASE_URL}/auth/v1`;
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY";
+
+// --- NexaPulse SSO (PKCE, public client — no secret needed) ---
+const NEXAPULSE_URL = "https://nexapulse-auth-nexapulse.vercel.app";
+const NEXAPULSE_CLIENT_ID = "nexastore_app_id";
+const NEXAPULSE_REDIRECT = typeof window !== 'undefined' ? window.location.origin + '/' : '';
+
+function base64url(bytes) {
+  let str = '';
+  for (const b of new Uint8Array(bytes)) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function startNexaPulseLogin() {
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const verifier = base64url(verifierBytes);
+  const challengeBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = base64url(challengeBuf);
+  sessionStorage.setItem('nexapulse_verifier', verifier);
+  const params = new URLSearchParams({
+    client_id: NEXAPULSE_CLIENT_ID,
+    redirect_uri: NEXAPULSE_REDIRECT,
+    state: crypto.randomUUID(),
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  });
+  window.location.href = `${NEXAPULSE_URL}/oauth/authorize?${params}`;
+}
+
+async function completeNexaPulseLogin(code) {
+  const verifier = sessionStorage.getItem('nexapulse_verifier');
+  if (!verifier) throw new Error('Missing PKCE verifier — please try signing in again.');
+  const res = await fetch(`${NEXAPULSE_URL}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'authorization_code',
+      code,
+      client_id: NEXAPULSE_CLIENT_ID,
+      code_verifier: verifier,
+    }),
+  });
+  sessionStorage.removeItem('nexapulse_verifier');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'NexaPulse sign-in failed');
+  }
+  const { access_token } = await res.json();
+  const info = await fetch(`${NEXAPULSE_URL}/oauth/userinfo`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+  return info.ok ? info.json() : null;
+}
+
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
 const PAYOUT_MODE = "direct";
 
@@ -906,6 +959,19 @@ function AuthModal({ onClose, onAuth }) {
             {loading ? 'Please wait…' : (mode === 'forgot' ? 'Send reset link' : (isSignUp ? 'Sign Up' : 'Sign In'))}
           </button>
         </form>
+
+        {mode === 'auth' && (
+          <>
+            <div className="flex items-center gap-3 my-4">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-[11px] text-gray-400 font-medium">OR</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+            <button type="button" onClick={startNexaPulseLogin} className="w-full border border-gray-200 text-gray-700 py-2.5 rounded-xl font-semibold text-[14px] hover:bg-gray-50 transition-colors">
+              Continue with NexaPulse
+            </button>
+          </>
+        )}
 
         {mode === 'auth' && !isSignUp && (
           <button type="button" onClick={() => { setMode('forgot'); setError(''); setInfo(''); }} className="w-full mt-3 text-gray-500 hover:text-violet-600 text-[12.5px] font-semibold">
@@ -4321,6 +4387,24 @@ export default function NexaStore() {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), duration);
   };
   const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
+
+  // Handle redirect back from NexaPulse SSO (?code=...)
+  // Identity confirmation only — does not mint a Supabase session yet.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    completeNexaPulseLogin(code)
+      .then((info) => {
+        if (info?.email) {
+          showToast(`Signed in via NexaPulse as ${info.email}`, 'success');
+        } else {
+          showToast('NexaPulse sign-in completed, but no profile was returned.', 'info');
+        }
+      })
+      .catch((e) => showToast(e.message || 'NexaPulse sign-in failed', 'error'));
+  }, []);
 
   const isOwned = (app) => {
     const price = parseFloat(app?.price) || 0;
