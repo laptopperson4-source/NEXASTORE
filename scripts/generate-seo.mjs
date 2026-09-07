@@ -213,22 +213,66 @@ async function main() {
     })
   );
 
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls
-  .map(
-    (u) => `  <url>
+  // Always include trust / legal / studio static pages
+  const staticPaths = [
+    { path: '/', priority: '1.0', changefreq: 'daily' },
+    { path: '/about/', priority: '0.95', changefreq: 'monthly' },
+    { path: '/payments/', priority: '0.95', changefreq: 'monthly' },
+    { path: '/terms/', priority: '0.75', changefreq: 'yearly' },
+    { path: '/privacy/', priority: '0.75', changefreq: 'yearly' },
+    { path: '/contact/', priority: '0.85', changefreq: 'monthly' },
+    { path: '/studio/nexapulse/', priority: '0.95', changefreq: 'weekly' },
+  ];
+  const seen = new Set(urls.map((u) => u.loc.replace(/\/$/, '')));
+  for (const s of staticPaths) {
+    const normalized = s.path === '/' ? `${SITE}/` : `${SITE}${s.path}`;
+    const key = normalized.replace(/\/$/, '');
+    if (seen.has(key)) continue;
+    urls.push({ loc: normalized, priority: s.priority, changefreq: s.changefreq });
+    seen.add(key);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const sitemapBody = urls
+    .map(
+      (u) => `  <url>
     <loc>${u.loc}</loc>
-    <lastmod>${new Date().toISOString().slice(0, 10)}</lastmod>
-    <changefreq>weekly</changefreq>
+    <lastmod>${today}</lastmod>
+    <changefreq>${u.changefreq || 'weekly'}</changefreq>
     <priority>${u.priority}</priority>
   </url>`
-  )
-  .join('\n')}
+    )
+    .join('\n');
+
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- NexaPulse Studios · NexaStore public sitemap · ${today} -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${sitemapBody}
 </urlset>
 `;
+
+  // Personal primary filename + standard alias for Search Console
+  fs.writeFileSync(path.join(publicDir, 'nexapulse-sitemap.xml'), sitemap);
   fs.writeFileSync(path.join(publicDir, 'sitemap.xml'), sitemap);
-  console.log(`[seo] wrote sitemap with ${urls.length} URLs + studio page + ${apps.length} app pages`);
+
+  const indexXml = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- NexaPulse Studios sitemap index -->
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>${SITE}/nexapulse-sitemap.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>
+</sitemapindex>
+`;
+  fs.writeFileSync(path.join(publicDir, 'nexapulse-sitemap-index.xml'), indexXml);
+
+  fs.writeFileSync(
+    path.join(publicDir, 'robots.txt'),
+    `User-agent: *\nAllow: /\n\n# NexaPulse Studios\nSitemap: ${SITE}/nexapulse-sitemap.xml\nSitemap: ${SITE}/sitemap.xml\nSitemap: ${SITE}/nexapulse-sitemap-index.xml\n`
+  );
+
+  console.log(`[seo] wrote nexapulse-sitemap.xml + sitemap.xml (${urls.length} URLs), studio + ${apps.length} apps`);
 }
 
 main().catch((e) => {
