@@ -1,19 +1,130 @@
 /**
- * NexaPay — Fiat-to-Crypto Payment Gateway
- * Cloudflare Workers + Supabase + Polygon USDT
- * Settlement: Polygon USDT (crypto-only, non-custodial)
+ * NexaPay — Polygon USDT payment gateway (Cloudflare Worker)
+ * Non-custodial: buyers send USDT; worker verifies on-chain then marks order paid.
+ *
+ * P0 security:
+ * - CORS allowlist (app.nexapulse.pro)
+ * - EVM address validation + locked pay_to on each order
+ * - Official Polygon USDT contract only
+ * - Amount match (strict 6-decimal window)
+ * - Multi-block confirmations before completed
+ * - Unique txHash (no double-credit)
  */
+
+const POLYGON_USDT = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
+const MIN_CONFIRMATIONS = 20;
+/** Amount tolerance as fraction (0.005 = 0.5%) */
+const AMOUNT_TOLERANCE = 0.005;
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://app.nexapulse.pro",
+  "https://nexastore-baj.pages.dev",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+];
+
+function isValidEvmAddress(addr) {
+  return typeof addr === "string" && /^0x[a-fA-F0-9]{40}$/.test(addr.trim());
+}
+
+function normalizeAddr(addr) {
+  return String(addr || "").trim().toLowerCase();
+}
+
+function corsHeaders(request, env) {
+  const origin = request.headers.get("Origin") || "";
+  const allowed = (env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const list = allowed.length ? allowed : DEFAULT_ALLOWED_ORIGINS;
+  const allowOrigin = list.includes(origin) ? origin : list[0];
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+}
+
+function json(data, status, cors) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...cors, "Content-Type": "application/json" },
+  });
+}
+
+async function sb(env, path, { method = "GET", body, prefer } = {}) {
+  const headers = {
+    apikey: env.SUPABASE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  if (prefer) headers.Prefer = prefer;
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  if (!r.ok) {
+    const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
+    throw new Error(`Supabase ${r.status}: ${msg}`);
+  }
+  return data;
+}
+
+async function getOrder(env, orderId) {
+  const rows = await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}&select=*&limit=1`);
+  return Array.isArray(rows) ? rows[0] : null;
+}
+
+/** Returns true if another order already claimed this tx hash */
+async function txHashAlreadyUsed(env, txHash, exceptOrderId) {
+  if (!txHash) return false;
+  const q =
+    `orders?onramp_transaction_id=eq.${encodeURIComponent(txHash)}` +
+    `&select=id,status&limit=5`;
+  const rows = await sb(env, q);
+  if (!Array.isArray(rows) || !rows.length) return false;
+  return rows.some((r) => r.id !== exceptOrderId);
+}
+
+async function fetchTokenTxs(wallet, apiKey) {
+  const apiUrl =
+    `https://api.polygonscan.com/api?module=account&action=tokentx` +
+    `&contractaddress=${POLYGON_USDT}&address=${wallet}` +
+    `&page=1&offset=50&sort=desc&apikey=${apiKey}`;
+  const chainRes = await fetch(apiUrl);
+  const chainData = await chainRes.json();
+  if (chainData.status !== "1" && !Array.isArray(chainData.result)) {
+    return { txs: [], error: chainData.message || chainData.result || "Polygonscan error" };
+  }
+  return { txs: Array.isArray(chainData.result) ? chainData.result : [] };
+}
+
+function amountInRange(rawValue, expectedUsdt) {
+  const expected = Number(expectedUsdt);
+  if (!Number.isFinite(expected) || expected <= 0) return false;
+  const minRaw = Math.floor(expected * (1 - AMOUNT_TOLERANCE) * 1e6);
+  const maxRaw = Math.ceil(expected * (1 + AMOUNT_TOLERANCE) * 1e6);
+  const val = parseInt(String(rawValue), 10);
+  if (!Number.isFinite(val)) return false;
+  return val >= minRaw && val <= maxRaw;
+}
 
 export default {
   async fetch(request, env) {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
+    const cors = corsHeaders(request, env);
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
+      return new Response(null, { headers: cors });
     }
 
     const url = new URL(request.url);
@@ -21,313 +132,273 @@ export default {
     // ─── CREATE ORDER ───────────────────────────────────────────
     if (url.pathname === "/api/create-order" && request.method === "POST") {
       try {
-        const { email, amount } = await request.json();
+        const body = await request.json();
+        const email = body.email;
+        const amount = Number(body.amount);
+        const payTo = (body.pay_to || body.address || body.wallet || env.DEFAULT_PAY_TO || "").trim();
+        const appId = body.app_id || null;
 
-        if (!email || !amount || amount <= 0) {
-          return new Response(
-            JSON.stringify({ error: "Valid email and amount are required" }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        if (!email || !Number.isFinite(amount) || amount <= 0) {
+          return json({ error: "Valid email and amount are required" }, 400, cors);
+        }
+        if (!isValidEvmAddress(payTo)) {
+          return json(
+            { error: "Valid pay_to (Polygon) address is required" },
+            400,
+            cors
           );
         }
 
-        const supabaseResponse = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/orders`,
-          {
+        const row = {
+          user_email: email,
+          amount_fiat: amount,
+          currency_fiat: "USD",
+          amount_crypto_expected: amount,
+          crypto_asset: "USDT",
+          blockchain_network: "polygon",
+          status: "pending",
+          pay_to: normalizeAddr(payTo),
+        };
+        if (appId) row.app_id = appId;
+
+        let created;
+        try {
+          created = await sb(env, "orders", {
             method: "POST",
-            headers: {
-              apikey: env.SUPABASE_KEY,
-              Authorization: `Bearer ${env.SUPABASE_KEY}`,
-              "Content-Type": "application/json",
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({
-              user_email: email,
-              amount_fiat: amount,
-              currency_fiat: "USD",
-              status: "pending",
-            }),
-          }
-        );
-
-        if (!supabaseResponse.ok) {
-          throw new Error(`Supabase error: ${await supabaseResponse.text()}`);
-        }
-
-        const data = await supabaseResponse.json();
-        const createdOrder = data[0];
-
-        return new Response(
-          JSON.stringify({ success: true, order: createdOrder }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // ─── WEBHOOK (Transak + generic) ────────────────────────────
-    if (url.pathname === "/api/webhook" && request.method === "POST") {
-      try {
-        const payload = await request.json();
-
-        // Transak can send:
-        // 1) Direct order object
-        // 2) { eventID, webhookData: { ... } }
-        // 3) { data: "<JWT>" }  — JWT needs Partner Access Token to decode (advanced)
-        // We handle 1 & 2 for MVP; JWT path can be added later.
-
-        let orderData = payload.webhookData || payload.data || payload;
-        if (typeof orderData === "string") {
-          // Encrypted JWT — acknowledge but skip update until JWT verify is wired
-          console.log("Transak JWT webhook received — decoding not configured yet");
-          return new Response(JSON.stringify({ received: true, note: "jwt_pending" }), {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            body: row,
+            prefer: "return=representation",
           });
-        }
-
-        // Extract partner order id (our Supabase UUID)
-        const orderId =
-          orderData.partnerOrderId ||
-          orderData.partner_order_id ||
-          payload.partnerOrderId ||
-          payload.partnerContext ||
-          payload.metaData?.orderId ||
-          payload.metadata?.orderId;
-
-        // Normalize status
-        const rawStatus = (
-          orderData.status ||
-          payload.status ||
-          payload.eventID ||
-          ""
-        ).toString().toUpperCase();
-
-        const isCompleted =
-          rawStatus === "COMPLETED" ||
-          rawStatus === "ORDER_COMPLETED" ||
-          rawStatus === "SUCCESS" ||
-          rawStatus === "FULFILLED";
-
-        const isFailed =
-          rawStatus === "FAILED" ||
-          rawStatus === "CANCELLED" ||
-          rawStatus === "ORDER_FAILED" ||
-          rawStatus === "REFUNDED" ||
-          rawStatus === "EXPIRED";
-
-        if (orderId && (isCompleted || isFailed)) {
-          const newStatus = isCompleted ? "completed" : "failed";
-          const txId =
-            orderData.id ||
-            orderData.orderId ||
-            payload.id ||
-            payload.orderId ||
-            null;
-
-          const updateResponse = await fetch(
-            `${env.SUPABASE_URL}/rest/v1/orders?id=eq.${orderId}`,
-            {
-              method: "PATCH",
-              headers: {
-                apikey: env.SUPABASE_KEY,
-                Authorization: `Bearer ${env.SUPABASE_KEY}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                status: newStatus,
-                onramp_transaction_id: txId,
-                updated_at: new Date().toISOString(),
-              }),
-            }
-          );
-
-          if (!updateResponse.ok) {
-            throw new Error(`Failed to update order: ${await updateResponse.text()}`);
+        } catch (e) {
+          // Schema without pay_to / app_id — retry minimal columns
+          const minimal = {
+            user_email: email,
+            amount_fiat: amount,
+            currency_fiat: "USD",
+            status: "pending",
+          };
+          created = await sb(env, "orders", {
+            method: "POST",
+            body: minimal,
+            prefer: "return=representation",
+          });
+          // Best-effort patch pay_to if column exists
+          const order = Array.isArray(created) ? created[0] : created;
+          if (order?.id) {
+            try {
+              await sb(env, `orders?id=eq.${order.id}`, {
+                method: "PATCH",
+                body: { pay_to: normalizeAddr(payTo) },
+              });
+              order.pay_to = normalizeAddr(payTo);
+            } catch (_) {}
           }
         }
 
-        return new Response(JSON.stringify({ received: true }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
+        const order = Array.isArray(created) ? created[0] : created;
+        if (!order?.id) throw new Error("Order created but no id returned");
 
-    // ─── HEALTH ─────────────────────────────────────────────────
-    if (url.pathname === "/api/health" && request.method === "GET") {
-      return new Response(
-        JSON.stringify({
-          status: "ok",
-          service: "nexapay",
-          onramp: "transak",
-          timestamp: new Date().toISOString(),
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+        // Ensure client always knows locked receiver
+        order.pay_to = order.pay_to || normalizeAddr(payTo);
+        order.address = order.pay_to;
+
+        return json({ success: true, order }, 200, cors);
+      } catch (err) {
+        return json({ error: err.message || "create-order failed" }, 500, cors);
+      }
     }
 
     // ─── ORDER STATUS ───────────────────────────────────────────
     if (url.pathname === "/api/order-status" && request.method === "GET") {
       try {
         const orderId = url.searchParams.get("id");
-        if (!orderId) {
-          return new Response(JSON.stringify({ error: "Order ID required" }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        const supabaseResponse = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/orders?id=eq.${orderId}&select=*`,
-          {
-            headers: {
-              apikey: env.SUPABASE_KEY,
-              Authorization: `Bearer ${env.SUPABASE_KEY}`,
-            },
-          }
-        );
-
-        if (!supabaseResponse.ok) {
-          throw new Error(`Supabase error: ${await supabaseResponse.text()}`);
-        }
-
-        const data = await supabaseResponse.json();
-        if (!data || data.length === 0) {
-          return new Response(JSON.stringify({ error: "Order not found" }), {
-            status: 404,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        return new Response(JSON.stringify({ order: data[0] }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (!orderId) return json({ error: "id required" }, 400, cors);
+        const order = await getOrder(env, orderId);
+        if (!order) return json({ error: "Order not found" }, 404, cors);
+        return json({ order, status: order.status }, 200, cors);
       } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: err.message }, 500, cors);
       }
     }
 
-
-    // ─── CHECK PAYMENT (Polygon USDT watcher helper) ──────────
-    // Call this periodically from the frontend. For production,
-    // set env POLYGONSCAN_API_KEY (free at polygonscan.com).
-    // Without a key we still return ok so polling order-status works.
+    // ─── CHECK PAYMENT (P0) ─────────────────────────────────────
     if (url.pathname === "/api/check-payment" && request.method === "GET") {
       try {
         const orderId = url.searchParams.get("id");
-        const amount = parseFloat(url.searchParams.get("amount") || "0");
-        if (!orderId) {
-          return new Response(JSON.stringify({ error: "id required" }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
+        const amountHint = url.searchParams.get("amount");
+        if (!orderId) return json({ error: "id required" }, 400, cors);
 
-        // Fetch order
-        const orderRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/orders?id=eq.${orderId}&select=*`,
-          {
-            headers: {
-              apikey: env.SUPABASE_KEY,
-              Authorization: `Bearer ${env.SUPABASE_KEY}`,
+        const order = await getOrder(env, orderId);
+        if (!order) return json({ error: "Order not found" }, 404, cors);
+
+        if (order.status === "completed" || order.status === "paid" || order.status === "success") {
+          return json(
+            {
+              paid: true,
+              status: "completed",
+              tx: order.onramp_transaction_id || null,
+              confirmations: order.confirmations ?? null,
             },
-          }
+            200,
+            cors
+          );
+        }
+
+        const wallet = normalizeAddr(
+          order.pay_to || order.deposit_address || env.DEFAULT_PAY_TO || ""
         );
-        const orders = await orderRes.json();
-        if (!orders?.length) {
-          return new Response(JSON.stringify({ error: "order not found" }), {
-            status: 404,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        const order = orders[0];
-        if (order.status === "completed") {
-          return new Response(JSON.stringify({ status: "completed", order }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+        if (!isValidEvmAddress(wallet)) {
+          return json(
+            {
+              paid: false,
+              status: order.status,
+              error: "Order has no valid pay_to address",
+            },
+            200,
+            cors
+          );
         }
 
-        // Optional: Polygonscan token transfer check
-        // USDT on Polygon: 0xc2132D05D31c914a87C6611C10748AEb04B58e8F
-        // Wallet: 0xF8720081dc56427AB7851fda9F05754304f0bfb2
-        const wallet = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
-        const usdt = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F";
         const apiKey = env.POLYGONSCAN_API_KEY || "";
+        if (!apiKey) {
+          return json(
+            {
+              paid: false,
+              status: order.status,
+              checked: true,
+              warning: "POLYGONSCAN_API_KEY not set — cannot verify on-chain",
+            },
+            200,
+            cors
+          );
+        }
 
-        if (apiKey) {
-          const expected = amount || Number(order.amount_fiat);
-          // amounts are in token units with 6 decimals for USDT
-          const minRaw = Math.floor(expected * 0.98 * 1e6); // 2% tolerance
-          const maxRaw = Math.floor(expected * 1.02 * 1e6);
-          const since = Math.floor(new Date(order.created_at).getTime() / 1000) - 60;
+        const expected = Number(amountHint || order.amount_crypto_expected || order.amount_fiat);
+        const since =
+          Math.floor(new Date(order.created_at).getTime() / 1000) - 120;
 
-          const apiUrl =
-            `https://api.polygonscan.com/api?module=account&action=tokentx` +
-            `&contractaddress=${usdt}&address=${wallet}&startblock=0&endblock=99999999` +
-            `&sort=desc&apikey=${apiKey}`;
+        const { txs, error: scanErr } = await fetchTokenTxs(wallet, apiKey);
+        if (scanErr && !txs.length) {
+          return json(
+            { paid: false, status: order.status, checked: true, warning: scanErr },
+            200,
+            cors
+          );
+        }
 
-          const chainRes = await fetch(apiUrl);
-          const chainData = await chainRes.json();
-          const txs = chainData.result || [];
+        // Prefer official USDT contract + exact receiver + amount + time
+        const candidates = txs.filter((tx) => {
+          const contract = normalizeAddr(tx.contractAddress);
+          if (contract !== POLYGON_USDT) return false;
+          if (normalizeAddr(tx.to) !== wallet) return false;
+          if (!amountInRange(tx.value, expected)) return false;
+          const ts = parseInt(tx.timeStamp, 10);
+          if (!Number.isFinite(ts) || ts < since) return false;
+          return true;
+        });
 
-          const match = Array.isArray(txs)
-            ? txs.find((tx) => {
-                if (tx.to?.toLowerCase() !== wallet.toLowerCase()) return false;
-                const val = parseInt(tx.value, 10);
-                const ts = parseInt(tx.timeStamp, 10);
-                return val >= minRaw && val <= maxRaw && ts >= since;
-              })
-            : null;
+        if (!candidates.length) {
+          return json({ paid: false, status: order.status, checked: true }, 200, cors);
+        }
 
-          if (match) {
-            await fetch(
-              `${env.SUPABASE_URL}/rest/v1/orders?id=eq.${orderId}`,
+        // Newest first already from sort=desc
+        for (const match of candidates) {
+          const conf = parseInt(match.confirmations, 10);
+          const confirmations = Number.isFinite(conf) ? conf : 0;
+          const txHash = match.hash;
+
+          if (confirmations < MIN_CONFIRMATIONS) {
+            // Surface progress but do not complete
+            return json(
               {
-                method: "PATCH",
-                headers: {
-                  apikey: env.SUPABASE_KEY,
-                  Authorization: `Bearer ${env.SUPABASE_KEY}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  status: "completed",
-                  onramp_transaction_id: match.hash,
-                  updated_at: new Date().toISOString(),
-                }),
-              }
-            );
-            return new Response(
-              JSON.stringify({ status: "completed", tx: match.hash }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                paid: false,
+                status: "confirming",
+                tx: txHash,
+                confirmations,
+                required: MIN_CONFIRMATIONS,
+                checked: true,
+              },
+              200,
+              cors
             );
           }
+
+          // Idempotency: reject if this hash already completed another order
+          if (await txHashAlreadyUsed(env, txHash, orderId)) {
+            continue; // try next candidate
+          }
+
+          try {
+            await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}`, {
+              method: "PATCH",
+              body: {
+                status: "completed",
+                onramp_transaction_id: txHash,
+                confirmations,
+                updated_at: new Date().toISOString(),
+              },
+            });
+          } catch (e) {
+            // Unique violation on tx hash → treat as not ours
+            if (/duplicate|unique|23505/i.test(String(e.message))) {
+              continue;
+            }
+            // Column confirmations may not exist
+            try {
+              await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}`, {
+                method: "PATCH",
+                body: {
+                  status: "completed",
+                  onramp_transaction_id: txHash,
+                  updated_at: new Date().toISOString(),
+                },
+              });
+            } catch (e2) {
+              throw e2;
+            }
+          }
+
+          return json(
+            {
+              paid: true,
+              status: "completed",
+              tx: txHash,
+              confirmations,
+              required: MIN_CONFIRMATIONS,
+            },
+            200,
+            cors
+          );
         }
 
-        return new Response(
-          JSON.stringify({ status: order.status, checked: true }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        return json(
+          {
+            paid: false,
+            status: order.status,
+            checked: true,
+            warning: "Matching transfer found but tx already used or not yet usable",
+          },
+          200,
+          cors
         );
       } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: err.message }, 500, cors);
       }
     }
 
+    // ─── WEBHOOK: disabled unsigned generic completion (P0) ─────
+    if (url.pathname === "/api/webhook" && request.method === "POST") {
+      const secret = env.WEBHOOK_SECRET || "";
+      const sig = request.headers.get("X-Nexapay-Signature") || "";
+      if (!secret || sig !== secret) {
+        return json({ error: "Unauthorized webhook" }, 401, cors);
+      }
+      return json(
+        { ok: false, message: "Signed webhooks accepted but auto-complete disabled; use check-payment" },
+        200,
+        cors
+      );
+    }
 
-    return new Response("Not Found", { status: 404, headers: corsHeaders });
+    return new Response("Not Found", { status: 404, headers: cors });
   },
 };

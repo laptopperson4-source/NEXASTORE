@@ -5,3 +5,9 @@ compatibility_date = "2024-09-23"
 # Secrets (set via `npx wrangler secret put`):
 #   SUPABASE_URL
 #   SUPABASE_KEY
+
+# Optional vars (wrangler secret put / dashboard):
+#   POLYGONSCAN_API_KEY   — required for on-chain verification
+#   DEFAULT_PAY_TO        — fallback receive address if client omits pay_to
+#   ALLOWED_ORIGINS       — comma list, default includes https://app.nexapulse.pro
+#   WEBHOOK_SECRET        — required for /api/webhook

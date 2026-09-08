@@ -2056,10 +2056,16 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
     setBusy(true);
     try {
       const receiptEmail = (profile && profile.email) || `buyer-${Date.now()}@nexastore.app`;
+      const payTo = (PAY_ADDRESS || NEXAPAY_DEPOSIT || '').trim();
       const r = await fetch(WORKER_URL + '/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: receiptEmail, amount: Number(lockedPrice) }),
+        body: JSON.stringify({
+          email: receiptEmail,
+          amount: Number(lockedPrice),
+          pay_to: payTo,
+          app_id: app?.id || null,
+        }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || data.error) {
@@ -2069,7 +2075,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       const created = data.order || data;
       const orderId = created.id || data.orderId || data.id;
       if (!orderId) throw new Error('Order created but no id returned');
-      const address = (PAY_ADDRESS || NEXAPAY_DEPOSIT).trim();
+      const address = (created.pay_to || created.address || payTo || PAY_ADDRESS || NEXAPAY_DEPOSIT).trim();
       setOrder({ orderId, amount: lockedPrice, address });
       setStage('pay');
       startPolling(orderId, lockedPrice);
