@@ -1739,7 +1739,7 @@ function metamaskUsdtSendLink(toAddress, amountUsdt) {
 
 
 /** Support replies — written as a human support agent (no AI disclosure). */
-const SUPPORT_MAILTO = 'blacknick517@gmail.com'; // hardcoded real inbox — never shown as plain text in UI
+const SUPPORT_MAILTO = 'help@nexapulse.pro'; // support inbox — shown only via mailto / contact page
 
 function openRealSupportEmail({ subject, body } = {}) {
   const s = encodeURIComponent(subject || 'NexaStore support');
