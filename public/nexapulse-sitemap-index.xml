@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- NexaPulse Studios sitemap index -->
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
     <loc>https://app.nexapulse.pro/nexapulse-sitemap.xml</loc>
-    <lastmod>2026-09-07</lastmod>
+    <lastmod>2026-09-08</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://app.nexapulse.pro/sitemap.xml</loc>
+    <lastmod>2026-09-08</lastmod>
   </sitemap>
 </sitemapindex>
