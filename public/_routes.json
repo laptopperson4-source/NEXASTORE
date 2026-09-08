@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/assets/*", "/branding/*", "/*.png", "/*.svg", "/*.ico", "/*.txt", "/*.xml", "/nexapay-widget.html"]
+}

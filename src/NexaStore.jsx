@@ -2399,7 +2399,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
 
 
-function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidApps = [] }) {
+function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidApps = [], portal = false }) {
   const text = dark ? 'text-white' : 'text-gray-900';
   const subtext = dark ? 'text-slate-400' : 'text-gray-500';
   const card = dark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100';
@@ -2513,15 +2513,24 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     } catch {}
   };
 
+  const shellClass = portal
+    ? `min-h-screen overflow-auto ${dark ? 'bg-[#050505]' : bg}`
+    : `fixed inset-0 z-[120] overflow-auto ${bg}`;
+
   return (
-    <div className={`fixed inset-0 z-[120] overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${bg} ${border}`}>
-        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
+    <div className={shellClass} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${portal ? 'bg-[#050505]/95 border-white/10' : `${bg} ${border}`}`}>
+        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark || portal ? 'hover:bg-white/10 text-white' : 'hover:bg-gray-100'} ${portal ? 'text-white' : text}`}>
           <ArrowLeft size={20} />
         </button>
-        <div className="min-w-0 flex-1">
-          <p className={`font-bold text-[15px] ${text}`}>Affiliate program</p>
-          <p className={`text-[11.5px] ${subtext}`}>Apply · wait for approval · then codes &amp; earnings</p>
+        <div className="min-w-0 flex-1 flex items-center gap-2">
+          {portal && (
+            <img src="/branding/nexapulse-seal.png" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+          )}
+          <div className="min-w-0">
+            <p className={`font-bold text-[15px] ${portal ? 'text-white' : text}`}>Affiliate program</p>
+            <p className={`text-[11.5px] ${portal ? 'text-zinc-400' : subtext}`}>Apply · wait for approval · then codes &amp; earnings</p>
+          </div>
         </div>
       </div>
 
@@ -5461,6 +5470,107 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 /* ============================================
    MAIN
    ============================================ */
+
+/** Full affiliate portal at /affiliates — signup + promoter dashboard (admin stays in main store). */
+function AffiliatePortal({ session, profile, paidApps, showToast, onAuth, onSignOut, onSessionFromAuth }) {
+  const [showAuth, setShowAuth] = useState(false);
+
+  const goStore = () => {
+    window.location.href = '/';
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-zinc-100" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(120,120,140,0.16), transparent 55%)',
+      }} />
+      <header className="relative z-10 flex items-center justify-between px-4 py-4 max-w-3xl mx-auto">
+        <a href="/affiliates/" className="flex items-center gap-2">
+          <img src="/branding/nexapulse-seal.png" alt="NexaPulse" className="w-10 h-10 rounded-full object-cover" />
+          <div>
+            <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-zinc-400">NexaStore</p>
+            <p className="text-[13px] font-bold text-zinc-100">Affiliate Program</p>
+          </div>
+        </a>
+        <div className="flex items-center gap-2">
+          <a href="/" className="text-[12px] font-semibold text-zinc-400 hover:text-white px-3 py-1.5 rounded-full border border-white/10">Store</a>
+          {session ? (
+            <button type="button" onClick={onSignOut} className="text-[12px] font-semibold text-zinc-300 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5">Sign out</button>
+          ) : (
+            <button type="button" onClick={() => setShowAuth(true)} className="text-[12px] font-bold text-black px-3 py-1.5 rounded-full bg-gradient-to-b from-zinc-100 to-zinc-400">Sign in</button>
+          )}
+        </div>
+      </header>
+
+      <div className="relative z-10 max-w-3xl mx-auto px-4 pb-8">
+        <div className="text-center pt-4 pb-6">
+          <img src="/branding/nexapulse-seal.png" alt="" className="w-20 h-20 mx-auto rounded-full object-cover shadow-[0_0_40px_rgba(180,180,200,0.15)]" />
+          <p className="mt-4 text-[11px] font-bold tracking-[0.28em] uppercase text-zinc-500">NexaStore · Affiliate Program</p>
+          <h1 className="mt-2 text-[1.75rem] sm:text-[2.1rem] font-extrabold tracking-tight bg-gradient-to-b from-white via-zinc-300 to-zinc-500 bg-clip-text text-transparent">
+            Earn 10% on every sale you refer
+          </h1>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {[
+              ['10%', 'per confirmed sale'],
+              ['USDT', 'payout'],
+              ['30d', 'code validity'],
+            ].map(([k, v]) => (
+              <div key={k} className="min-w-[96px] rounded-xl border border-white/10 bg-gradient-to-b from-zinc-800/90 to-black/90 px-4 py-3">
+                <p className="text-[1.1rem] font-extrabold bg-gradient-to-b from-white to-zinc-400 bg-clip-text text-transparent">{k}</p>
+                <p className="text-[11px] text-zinc-500">{v}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[12px] text-zinc-500">
+            Share: <code className="text-zinc-300">app.nexapulse.pro/affiliates/</code>
+          </p>
+        </div>
+
+        {!session || !profile ? (
+          <div className="rounded-2xl border border-white/10 bg-zinc-900/50 p-6 text-center space-y-3">
+            <p className="text-[15px] font-bold text-zinc-100">Sign in to apply or open your affiliate dashboard</p>
+            <p className="text-[13px] text-zinc-400">Signup, approval status, codes, and earnings all live on this page.</p>
+            <button type="button" onClick={() => setShowAuth(true)}
+              className="w-full max-w-sm mx-auto py-3 rounded-full font-bold text-[14px] text-black bg-gradient-to-b from-zinc-100 to-zinc-400">
+              Sign in / Sign up
+            </button>
+          </div>
+        ) : profile.is_owner ? (
+          <div className="rounded-2xl border border-white/10 bg-zinc-900/50 p-6 text-center space-y-3">
+            <p className="text-[15px] font-bold text-zinc-100">You are the store owner</p>
+            <p className="text-[13px] text-zinc-400">Affiliate <strong className="text-zinc-200">Admin</strong> stays inside NexaStore. Promoter tools on this page are for affiliates only.</p>
+            <a href="/" className="inline-flex py-3 px-6 rounded-full font-bold text-[14px] text-black bg-gradient-to-b from-zinc-100 to-zinc-400">
+              Open NexaStore Admin
+            </a>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-white/10 overflow-hidden bg-[#0a0a0c]">
+            <AffiliateDashboard
+              session={session}
+              profile={profile}
+              onClose={goStore}
+              dark={true}
+              showToast={showToast}
+              paidApps={paidApps}
+              portal={true}
+            />
+          </div>
+        )}
+      </div>
+
+      {showAuth && (
+        <AuthModal
+          onClose={() => setShowAuth(false)}
+          onAuth={(sess) => {
+            setShowAuth(false);
+            onSessionFromAuth?.(sess);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function NexaStore() {
   const [view, setView] = useState('home');
   const [session, setSession] = useState(null);
@@ -5720,6 +5830,20 @@ export default function NexaStore() {
     onOpenTutorial: openTutorialById,
   };
   void ownedTick;
+
+  const isAffiliatePath = typeof window !== 'undefined' && /^\/affiliates\/?$/.test(window.location.pathname);
+  if (isAffiliatePath) {
+    return (
+      <AffiliatePortal
+        session={session}
+        profile={profile}
+        paidApps={(allApps || []).filter((a) => (parseFloat(a.price) || 0) > 0 && a.status === 'approved')}
+        showToast={showToast}
+        onSessionFromAuth={handleAuth}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   return (
     <div style={{ fontFamily: "'Inter', sans-serif" }}>
