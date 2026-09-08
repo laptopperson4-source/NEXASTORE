@@ -3,56 +3,322 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Affiliate program · NexaStore</title>
-  <meta name="description" content="NexaStore affiliate program — promo codes, pay per confirmed purchase only. Early program by NexaPulse Studios."/>
+  <title>NexaStore Affiliate Program · Earn 10% USDT</title>
+  <meta name="description" content="Join the NexaStore affiliate program. Earn 10% on every confirmed sale you refer. USDT payouts on Polygon. 30-day promo codes."/>
   <link rel="canonical" href="https://app.nexapulse.pro/affiliates/"/>
+  <meta property="og:title" content="NexaStore Affiliate Program — Earn 10% on every sale"/>
+  <meta property="og:description" content="Promote paid apps. Get paid in USDT per confirmed purchase. Apply once — shareable link: app.nexapulse.pro/affiliates/"/>
+  <meta property="og:url" content="https://app.nexapulse.pro/affiliates/"/>
+  <meta property="og:type" content="website"/>
+  <meta name="theme-color" content="#050505"/>
+  <link rel="icon" href="/nexastore-icon.png"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
-    body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
-    a{color:#6d28d9}.wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
-    h1{font-size:1.75rem;margin:0 0 8px}h2{font-size:1.1rem;margin:28px 0 8px}
-    .muted{color:#64748b;font-size:.95rem}.card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin:16px 0}
-    nav a{margin-right:12px;font-size:.9rem;font-weight:600;text-decoration:none;color:#475569}
-    .badge{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:.75rem;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:12px}
+    :root {
+      --bg: #050505;
+      --bg2: #0a0a0c;
+      --chrome: linear-gradient(135deg, #8a8a92 0%, #e8e8ec 22%, #9a9aa2 45%, #f5f5f7 55%, #6e6e76 78%, #c8c8d0 100%);
+      --chrome-text: linear-gradient(180deg, #ffffff 0%, #c0c0c8 40%, #8a8a92 70%, #e8e8f0 100%);
+      --line: rgba(255,255,255,0.08);
+      --muted: #8b8b96;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: #e8e8ec;
+      min-height: 100vh;
+      line-height: 1.55;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(120,120,140,0.18), transparent 55%),
+        radial-gradient(ellipse 50% 40% at 80% 60%, rgba(80,80,100,0.08), transparent 50%),
+        radial-gradient(ellipse 40% 30% at 15% 70%, rgba(60,60,80,0.1), transparent 45%);
+    }
+    a { color: inherit; text-decoration: none; }
+    .wrap { position: relative; z-index: 1; max-width: 920px; margin: 0 auto; padding: 0 20px 80px; }
+
+    /* Nav */
+    .top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 0 8px; gap: 12px;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px;
+      letter-spacing: 0.04em; color: #c8c8d0;
+    }
+    .brand img { width: 28px; height: 28px; border-radius: 8px; }
+    .top-links { display: flex; gap: 8px; flex-wrap: wrap; }
+    .top-links a {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      padding: 8px 12px; border-radius: 999px; border: 1px solid transparent;
+    }
+    .top-links a:hover { color: #eee; border-color: var(--line); background: rgba(255,255,255,0.03); }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 56px 12px 40px;
+      position: relative;
+    }
+    .hero::after {
+      content: "";
+      position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+      width: min(520px, 90%); height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(200,200,210,0.35), transparent);
+    }
+    .seal {
+      width: 72px; height: 72px; margin: 0 auto 18px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 30%, #f0f0f4 0%, #a8a8b0 25%, #5a5a62 55%, #2a2a30 100%);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.15),
+        0 0 40px rgba(180,180,200,0.12),
+        inset 0 2px 6px rgba(255,255,255,0.35),
+        inset 0 -4px 10px rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+    .seal::before {
+      content: "";
+      position: absolute; inset: 6px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .seal span {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.12em;
+      background: var(--chrome-text); -webkit-background-clip: text; background-clip: text;
+      color: transparent; text-transform: uppercase;
+    }
+    .eyebrow {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.28em; text-transform: uppercase;
+      color: #9a9aa5; margin-bottom: 14px;
+    }
+    h1 {
+      font-size: clamp(1.85rem, 5.5vw, 2.75rem);
+      font-weight: 800; line-height: 1.15; letter-spacing: -0.03em;
+      background: var(--chrome-text);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+      text-shadow: 0 2px 30px rgba(255,255,255,0.06);
+      margin-bottom: 22px;
+    }
+    .pills {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+      margin-bottom: 28px;
+    }
+    .pill {
+      min-width: 100px;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(40,40,46,0.95) 0%, rgba(18,18,22,0.98) 100%);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.08) inset,
+        0 12px 32px rgba(0,0,0,0.45);
+    }
+    .pill strong {
+      display: block; font-size: 1.15rem; font-weight: 800;
+      background: var(--chrome-text); -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .pill span { font-size: 11px; color: var(--muted); font-weight: 500; }
+
+    .cta-row {
+      display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: center;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 14px 28px; border-radius: 999px; font-weight: 700; font-size: 14px;
+      color: #0a0a0c;
+      background: linear-gradient(180deg, #f2f2f6 0%, #b8b8c0 45%, #e8e8ee 55%, #909098 100%);
+      border: 1px solid rgba(255,255,255,0.35);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.5) inset,
+        0 10px 28px rgba(0,0,0,0.5);
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }
+    .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    .btn-ghost {
+      display: inline-flex; padding: 14px 22px; border-radius: 999px;
+      font-weight: 600; font-size: 13px; color: #c8c8d0;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+    }
+    .btn-ghost:hover { border-color: rgba(255,255,255,0.22); color: #fff; }
+    .share-hint {
+      margin-top: 16px; font-size: 12px; color: var(--muted);
+    }
+    .share-hint code {
+      font-size: 11px; padding: 4px 8px; border-radius: 6px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+      color: #d0d0d8;
+    }
+    .copy-btn {
+      margin-left: 6px; font-size: 11px; font-weight: 700; color: #c8c8d0;
+      background: none; border: none; cursor: pointer; text-decoration: underline;
+    }
+
+    /* Sections */
+    section { margin-top: 48px; }
+    h2 {
+      font-size: 1.05rem; font-weight: 700; margin-bottom: 14px;
+      letter-spacing: -0.01em;
+      background: var(--chrome-text); -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .grid {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .card {
+      padding: 20px;
+      border-radius: 16px;
+      background: linear-gradient(165deg, rgba(32,32,38,0.9) 0%, rgba(12,12,14,0.95) 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 16px 40px rgba(0,0,0,0.35);
+    }
+    .card h3 {
+      font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #f0f0f4;
+    }
+    .card p { font-size: 13px; color: var(--muted); }
+    ol.steps {
+      list-style: none; counter-reset: step;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    ol.steps li {
+      counter-increment: step;
+      display: flex; gap: 14px; align-items: flex-start;
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--line);
+    }
+    ol.steps li::before {
+      content: counter(step);
+      flex-shrink: 0;
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 800; color: #0a0a0c;
+      background: linear-gradient(180deg, #eee 0%, #9898a0 100%);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset;
+    }
+    ol.steps li span { font-size: 13.5px; color: #c8c8d0; padding-top: 4px; }
+    .note {
+      margin-top: 16px; font-size: 12.5px; color: var(--muted);
+      padding: 14px 16px; border-radius: 12px;
+      border: 1px dashed rgba(255,255,255,0.12);
+    }
+    footer {
+      margin-top: 64px; padding-top: 24px;
+      border-top: 1px solid var(--line);
+      text-align: center; font-size: 12px; color: #6a6a74;
+    }
+    footer a { color: #9a9aa5; margin: 0 8px; }
   </style>
 </head>
 <body>
-<div class="wrap">
-  <nav>
-    <a href="/">NexaStore</a>
-    <a href="/about/">About</a>
-    <a href="/payments/">Payments</a>
-    <a href="/affiliates/">Affiliates</a>
-    <a href="/contact/">Contact</a>
-  </nav>
-  <p class="badge">Early program · NexaPulse Studios</p>
-  <h1>Affiliate program</h1>
-  <p class="muted">Last updated: 7 September 2026</p>
-  <div class="card">
-    <p>Promote NexaStore apps with your <strong>promo code</strong>. You are paid only for <strong>confirmed purchases</strong> — not for impressions, likes, or follows.</p>
-    <p>This is an early program. Rates and rules can change. We do not pay for fake or bot traffic.</p>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/">
+        <img src="/nexastore-icon.png" alt=""/>
+        NexaStore
+      </a>
+      <nav class="top-links">
+        <a href="/">Store</a>
+        <a href="/about/">About</a>
+        <a href="/payments/">Payments</a>
+        <a href="/contact/">Contact</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div class="seal" aria-hidden="true"><span>NS</span></div>
+      <p class="eyebrow">NexaStore · Affiliate Program</p>
+      <h1>Earn 10% on every sale you refer</h1>
+      <div class="pills">
+        <div class="pill"><strong>10%</strong><span>per confirmed sale</span></div>
+        <div class="pill"><strong>USDT</strong><span>payout</span></div>
+        <div class="pill"><strong>30d</strong><span>code validity</span></div>
+      </div>
+      <div class="cta-row">
+        <a class="btn-primary" href="/?open=affiliate">Apply in NexaStore</a>
+        <a class="btn-ghost" href="/?open=affiliate">Open affiliate signup</a>
+      </div>
+      <p class="share-hint">
+        Share this page:
+        <code id="shareUrl">https://app.nexapulse.pro/affiliates/</code>
+        <button type="button" class="copy-btn" id="copyLink">Copy</button>
+      </p>
+    </div>
+
+    <section>
+      <h2>Why promote NexaStore</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Pay per sale only</h3>
+          <p>No impressions, no empty traffic. Credit lands when a buyer completes a real USDT purchase with your code.</p>
+        </div>
+        <div class="card">
+          <h3>USDT on Polygon</h3>
+          <p>Payouts tracked in USDT. You set a Polygon wallet after you’re approved.</p>
+        </div>
+        <div class="card">
+          <h3>Per-app codes</h3>
+          <p>Generate checkout codes for paid apps. Codes expire after 30 days — then create a new one.</p>
+        </div>
+        <div class="card">
+          <h3>Owner review</h3>
+          <p>Apply once. The store owner accepts or removes applications. Your dashboard unlocks only when active.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>How to join</h2>
+      <ol class="steps">
+        <li><span>Open NexaStore and sign in (or create an account).</span></li>
+        <li><span>Go to <strong>Profile → Affiliate program</strong> and submit your application.</span></li>
+        <li><span>Wait for approval — no codes or earnings until you’re accepted.</span></li>
+        <li><span>Generate a code for a paid app and share your checkout link.</span></li>
+      </ol>
+      <p class="note">This is an early program by NexaPulse Studios. Rates and rules can change. Fake or bot traffic is not paid and can get you blocked.</p>
+    </section>
+
+    <section style="text-align:center;margin-top:40px">
+      <a class="btn-primary" href="/?open=affiliate">Start affiliate signup</a>
+    </section>
+
+    <footer>
+      <p>NexaPulse Studios · NexaStore</p>
+      <p style="margin-top:10px">
+        <a href="/">Store</a>
+        <a href="/terms/">Terms</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="/contact/">Contact</a>
+      </p>
+    </footer>
   </div>
-  <h2>How it works</h2>
-  <ol>
-    <li>Create a NexaStore account and open <strong>Profile → Affiliate dashboard</strong> (promoters only — not the admin account).</li>
-    <li>Your status starts as <strong>pending</strong> until an admin accepts you. Only <strong>active</strong> codes earn credit.</li>
-    <li>After admin <strong>Accept</strong>, open Code &amp; links and press <strong>Generate code</strong>. Codes last <strong>30 days</strong>; when one expires you can generate a new one.</li>
-    <li>Share links like <code>https://app.nexapulse.pro/?promo=YOURCODE</code> or tell buyers to enter the code at checkout.</li>
-    <li>When a paid purchase is confirmed with your code, it is attributed to you in the dashboard.</li>
-    <li>Payouts are in USDT on Polygon to the wallet you set, after manual review (weekly when volume exists).</li>
-  </ol>
-  <h2>Default reward (early)</h2>
-  <div class="card">
-    <p><strong>10% of the app price</strong> per confirmed paid sale attributed to your code (paid by NexaPulse from program budget — not taken from the developer’s direct wallet transfer unless stated later).</p>
-    <p class="muted">Example: 2.00 USDT app → 0.20 USDT affiliate credit after confirmation.</p>
-  </div>
-  <h2>Rules</h2>
-  <ul>
-    <li>No purchased followers, bot spam, or misleading claims.</li>
-    <li>No pretending to be NexaPulse support.</li>
-    <li>Self-purchases may be excluded.</li>
-    <li>We may pause or remove accounts that break rules.</li>
-  </ul>
-  <p class="muted"><a href="/">← Back to NexaStore</a> · Questions: <a href="/contact/">Contact</a></p>
-</div>
+  <script>
+    (function () {
+      var btn = document.getElementById('copyLink');
+      var url = 'https://app.nexapulse.pro/affiliates/';
+      if (btn) btn.addEventListener('click', function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+          });
+        } else {
+          prompt('Copy this link', url);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

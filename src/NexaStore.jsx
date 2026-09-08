@@ -3029,7 +3029,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
               ['Terms', '/terms/'],
               ['Privacy', '/privacy/'],
               ['Contact', '/contact/'],
-              ['Affiliates', '/affiliates/'],
+              ['Affiliate program', '/affiliates/'],
             ].map(([label, href]) => (
               <a key={href} href={href} target="_blank" rel="noopener noreferrer"
                 className={`text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-white/10 text-slate-200' : 'bg-white border border-gray-200 text-gray-700'}`}>
@@ -5471,6 +5471,20 @@ export default function NexaStore() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showAffiliateDash, setShowAffiliateDash] = useState(false);
   const [showAffiliateAdmin, setShowAffiliateAdmin] = useState(false);
+  // Shareable landing: /affiliates/ → /?open=affiliate opens promoter signup
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('open') === 'affiliate') {
+        setView('profile');
+        // Slight delay so profile mounts; open promoter panel (not owner admin)
+        const t = setTimeout(() => setShowAffiliateDash(true), 100);
+        window.history.replaceState({}, '', window.location.pathname);
+        return () => clearTimeout(t);
+      }
+    } catch {}
+  }, []);
+
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [selectedApp, setSelectedApp] = useState(null);
 
