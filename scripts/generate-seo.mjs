@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const publicDir = path.join(root, 'public');
 
-const SITE = process.env.NEXASTORE_SITE_URL || 'https://nexastore-baj.pages.dev';
+const SITE = process.env.NEXASTORE_SITE_URL || 'https://app.nexapulse.pro';
 const SUPABASE_URL = process.env.NEXASTORE_SUPABASE_URL || 'https://mapswtriwoxlscjdakpk.supabase.co';
 const ANON =
   process.env.NEXASTORE_ANON_KEY ||

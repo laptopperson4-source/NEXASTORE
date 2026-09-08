@@ -2,6 +2,6 @@ User-agent: *
 Allow: /
 
 # NexaPulse Studios — primary sitemap (personal name)
-Sitemap: https://nexastore-baj.pages.dev/nexapulse-sitemap.xml
-Sitemap: https://nexastore-baj.pages.dev/sitemap.xml
-Sitemap: https://nexastore-baj.pages.dev/nexapulse-sitemap-index.xml
+Sitemap: https://app.nexapulse.pro/nexapulse-sitemap.xml
+Sitemap: https://app.nexapulse.pro/sitemap.xml
+Sitemap: https://app.nexapulse.pro/nexapulse-sitemap-index.xml

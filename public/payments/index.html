@@ -3,7 +3,7 @@
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>How payments work · NexaStore</title>
 <meta name="description" content="How NexaStore USDT payments on Polygon work, who receives funds, and risks."/>
-<link rel="canonical" href="https://nexastore-baj.pages.dev/payments/"/>
+<link rel="canonical" href="https://app.nexapulse.pro/payments/"/>
 <style>
   body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
   a{color:#6d28d9} .wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
@@ -45,6 +45,11 @@
 <li>Wrong network or wrong address usually cannot be reversed.</li>
 <li>The marketplace is early; treat small test amounts as the safe way to learn the flow.</li>
 </ul>
+</div>
+<div class="card">
+<h2 style="margin-top:0">Who pays network gas</h2>
+<p>On a normal Polygon transfer from the buyer’s wallet (e.g. MetaMask), <strong>network gas (POL)</strong> is paid by the wallet that sends the transaction — the buyer. The app price in USDT is separate.</p>
+<p>Having the <em>developer</em> pay gas for every customer requires sponsored transactions (paymaster / relayer), which is not the default MetaMask “send USDT” flow. Until that is built, buyers need a little POL for gas in addition to the USDT price.</p>
 </div>
 <p class="muted"><a href="/">← Back to NexaStore</a></p>
 </div></body></html>

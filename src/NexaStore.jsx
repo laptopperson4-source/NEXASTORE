@@ -152,7 +152,7 @@ async function sbSignIn(email, password) {
 }
 
 async function sbResetPassword(email) {
-  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://nexastore-baj.pages.dev/';
+  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://app.nexapulse.pro/';
   const r = await fetch(`${AUTHAPI}/recover`, {
     method: 'POST',
     body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
@@ -287,7 +287,7 @@ function walletCheckoutWarnings(wallet) {
     return [
       'In MetaMask, open the network menu and select Polygon Mainnet (chain 137).',
       'Buy or bridge USDT on Polygon — USDT on Ethereum/BSC will not work for this payment.',
-      'Keep a little POL in the same account for gas fees.',
+      'Polygon requires a little POL in the sending wallet for network gas (not a store commission).',
       'When you pay, confirm the popup in this browser — do not switch networks mid-payment.',
     ];
   }
@@ -314,7 +314,7 @@ function walletCheckoutWarnings(wallet) {
   return [
     'Set your wallet network to Polygon Mainnet before buying or sending.',
     'Only Polygon USDT is accepted. Other networks = lost funds.',
-    'Buy at least the listed USDT amount, plus a little native gas token (POL).',
+    'Buy the listed USDT amount on Polygon. Network gas (a small amount of POL) is required by the blockchain for any send — this is not a NexaStore fee.',
     'Come back to NexaStore and tap Continue to Payment / Pay in browser wallet.',
   ];
 }
@@ -1676,7 +1676,7 @@ async function sendUsdtViaBrowserWallet(toAddress, amountUsdt) {
         return {
           ok: false,
           reason: 'insufficient_gas',
-          message: 'You need a little POL (Polygon gas) to send USDT. Add a small amount of POL to this wallet, then try again.',
+          message: 'Polygon requires a little POL for network gas to send USDT (paid to the network, not to NexaStore or the developer). Add a small amount of POL, then try again.',
         };
       }
     } catch {
@@ -1798,7 +1798,7 @@ function aiSupportReply(userText, ctx = {}) {
     return `Use Sign in / Create account from Profile. You need an account to save purchases and publish as a developer. If you cannot sign in, try resetting via your email provider flow or Contact support team with the email you used (do not send passwords).`;
   }
   if (/trust (nexapulse|nexastore|you|this)|scam|legit|safe|reliable|real company|can i trust/.test(q)) {
-    return `NexaStore is a real app marketplace. Payments use USDT on Polygon to the developer payout address (or platform fallback). NexaPulse Studios is a publisher on the store. Always confirm you are on nexastore-baj.pages.dev, send only the listed USDT amount on Polygon, and use Contact support team if something looks wrong.`;
+    return `NexaStore is a real app marketplace. Payments use USDT on Polygon to the developer payout address (or platform fallback). NexaPulse Studios is a publisher on the store. Always confirm you are on app.nexapulse.pro, send only the listed USDT amount on Polygon, and use Contact support team if something looks wrong.`;
   }
   if (/wallet|connect|coinbase|phantom|which wallet|recommended|trust wallet|metamask only/.test(q)) {
     return `NexaStore payments on Polygon work best with MetaMask (browser extension or mobile). Other wallets are listed for creating accounts, but MetaMask is the recommended path for Pay in browser. Always switch to Polygon before sending USDT.`;
@@ -2450,7 +2450,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     }
     return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
   }, [allSales]);
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nexastore-baj.pages.dev';
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.nexapulse.pro';
 
   const onApply = async () => {
     setApplyBusy(true);

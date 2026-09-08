@@ -19,7 +19,7 @@ Usage:
     )
     
     print(f"App published: {app_id}")
-    print(f"View at: https://nexastore-baj.pages.dev?app={app_id}")
+    print(f"View at: https://app.nexapulse.pro?app={app_id}")
 """
 
 import requests
@@ -237,7 +237,7 @@ class NexaStoreClient:
         print(f"✅ App published successfully!")
         print(f"   App ID: {app_id}")
         print(f"   Status: Pending owner approval")
-        print(f"   View: https://nexastore-baj.pages.dev")
+        print(f"   View: https://app.nexapulse.pro")
         
         return app_id
 

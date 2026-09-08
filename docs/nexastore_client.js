@@ -214,7 +214,7 @@ class NexaStoreClient {
     console.log(`✅ App published successfully!`);
     console.log(`   App ID: ${appId}`);
     console.log(`   Status: Pending owner approval`);
-    console.log(`   View: https://nexastore-baj.pages.dev`);
+    console.log(`   View: https://app.nexapulse.pro`);
 
     return appId;
   }

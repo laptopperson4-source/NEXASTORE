@@ -111,7 +111,7 @@ def main():
     
     print(f"\n🎉 Success!")
     print(f"App ID: {app_id}")
-    print(f"View at: https://nexastore-baj.pages.dev")
+    print(f"View at: https://app.nexapulse.pro")
 
 if __name__ == "__main__":
     main()
@@ -213,7 +213,7 @@ async function main() {
 
   console.log(`\n🎉 Success!`);
   console.log(`App ID: ${appId}`);
-  console.log(`View at: https://nexastore-baj.pages.dev`);
+  console.log(`View at: https://app.nexapulse.pro`);
 }
 
 main().catch(err => {
@@ -257,7 +257,7 @@ app_id = client.submit_app(...)  # With all your created assets
 ```
 Print the app ID and link for the user:
 ✅ App published: {app_id}
-View at: https://nexastore-baj.pages.dev
+View at: https://app.nexapulse.pro
 Status: Pending owner approval
 ```
 
@@ -353,7 +353,7 @@ Your AI will know the app ID immediately after submission, so you can provide th
 ✅ App published successfully!
    App ID: 550e8400-e29b-41d4-a716-446655440000
    Status: Pending owner approval
-   View: https://nexastore-baj.pages.dev
+   View: https://app.nexapulse.pro
 ```
 
 Done! Your AI can now autonomously publish apps.
