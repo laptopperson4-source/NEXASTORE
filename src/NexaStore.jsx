@@ -1995,7 +1995,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const pollRef = useRef(null);
   const warnings = walletCheckoutWarnings(wallet);
 
-  const WORKER_URL = 'https://nexapay-gateway.laptopperson4.workers.dev';
+  const WORKER_URL = 'https://nexapay-gateway.blacknick517.workers.dev';
   const PAY_ADDRESS = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
 
   const bg = dark ? 'bg-[#0f172a]' : 'bg-white';
