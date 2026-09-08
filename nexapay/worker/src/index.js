@@ -97,16 +97,49 @@ async function txHashAlreadyUsed(env, txHash, exceptOrderId) {
 }
 
 async function fetchTokenTxs(wallet, apiKey) {
-  const apiUrl =
+  // Etherscan API V2 (Polygon chainid=137). Same key works for Polygon + other EVM chains.
+  // Fallback: legacy api.polygonscan.com if V2 fails.
+  const v2Url =
+    `https://api.etherscan.io/v2/api?chainid=137` +
+    `&module=account&action=tokentx` +
+    `&contractaddress=${POLYGON_USDT}&address=${wallet}` +
+    `&page=1&offset=50&sort=desc&apikey=${apiKey}`;
+  const legacyUrl =
     `https://api.polygonscan.com/api?module=account&action=tokentx` +
     `&contractaddress=${POLYGON_USDT}&address=${wallet}` +
     `&page=1&offset=50&sort=desc&apikey=${apiKey}`;
-  const chainRes = await fetch(apiUrl);
-  const chainData = await chainRes.json();
-  if (chainData.status !== "1" && !Array.isArray(chainData.result)) {
-    return { txs: [], error: chainData.message || chainData.result || "Polygonscan error" };
+
+  for (const apiUrl of [v2Url, legacyUrl]) {
+    try {
+      const chainRes = await fetch(apiUrl);
+      const chainData = await chainRes.json();
+      if (Array.isArray(chainData.result)) {
+        return { txs: chainData.result };
+      }
+      if (chainData.status === "1" && Array.isArray(chainData.result)) {
+        return { txs: chainData.result };
+      }
+      // "No transactions found" is a valid empty result
+      if (
+        typeof chainData.result === "string" &&
+        /no transaction/i.test(chainData.result)
+      ) {
+        return { txs: [] };
+      }
+      // try next endpoint
+      if (apiUrl === legacyUrl) {
+        return {
+          txs: [],
+          error: chainData.message || chainData.result || "Explorer API error",
+        };
+      }
+    } catch (e) {
+      if (apiUrl === legacyUrl) {
+        return { txs: [], error: e.message || "Explorer fetch failed" };
+      }
+    }
   }
-  return { txs: Array.isArray(chainData.result) ? chainData.result : [] };
+  return { txs: [] };
 }
 
 function amountInRange(rawValue, expectedUsdt) {
