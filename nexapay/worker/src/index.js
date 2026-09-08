@@ -16,6 +16,30 @@ const MIN_CONFIRMATIONS = 20;
 /** Amount tolerance as fraction (0.005 = 0.5%) */
 const AMOUNT_TOLERANCE = 0.005;
 
+function cleanEnv(v) {
+  if (v == null) return "";
+  return String(v).trim().replace(/^["']|["']$/g, "").replace(/\r/g, "").trim();
+}
+
+function supabaseBase(env) {
+  let base = cleanEnv(env.SUPABASE_URL);
+  if (!base) throw new Error("SUPABASE_URL secret is missing");
+  base = base.replace(/\/$/, "");
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(base)) {
+    throw new Error(
+      "SUPABASE_URL must look like https://YOURPROJECT.supabase.co (no path, no quotes). Got: " +
+        base.slice(0, 80)
+    );
+  }
+  return base;
+}
+
+function supabaseKey(env) {
+  const key = cleanEnv(env.SUPABASE_KEY);
+  if (!key) throw new Error("SUPABASE_KEY secret is missing");
+  return key;
+}
+
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://app.nexapulse.pro",
   "https://nexastore-baj.pages.dev",
@@ -55,17 +79,27 @@ function json(data, status, cors) {
 }
 
 async function sb(env, path, { method = "GET", body, prefer } = {}) {
+  const base = supabaseBase(env);
+  const key = supabaseKey(env);
   const headers = {
-    apikey: env.SUPABASE_KEY,
-    Authorization: `Bearer ${env.SUPABASE_KEY}`,
+    apikey: key,
+    Authorization: `Bearer ${key}`,
     "Content-Type": "application/json",
   };
   if (prefer) headers.Prefer = prefer;
-  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
-    method,
-    headers,
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
+  const url = `${base}/rest/v1/${path}`;
+  let r;
+  try {
+    r = await fetch(url, {
+      method,
+      headers,
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new Error(
+      `Cannot reach Supabase at ${base} (${e.message || e}). Re-check SUPABASE_URL secret.`
+    );
+  }
   const text = await r.text();
   let data = null;
   try {
