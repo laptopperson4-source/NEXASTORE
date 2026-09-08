@@ -1,49 +1,69 @@
 <!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Privacy Policy · NexaStore</title>
-<meta name="description" content="How NexaStore handles account and usage data."/>
-<link rel="canonical" href="https://app.nexapulse.pro/privacy/"/>
-<style>
-  body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
-  a{color:#6d28d9} .wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
-  h1{font-size:1.75rem;margin:0 0 8px} h2{font-size:1.15rem;margin:28px 0 8px}
-  .muted{color:#64748b;font-size:0.95rem} .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin:16px 0}
-  nav a{margin-right:14px;font-size:0.9rem;font-weight:600;text-decoration:none;color:#475569}
-  nav a:hover{color:#6d28d9} .badge{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:0.75rem;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:12px}
-</style>
-</head><body><div class="wrap">
-<nav>
-  <a href="/">NexaStore</a>
-  <a href="/about/">About</a>
-  <a href="/payments/">Payments</a>
-  <a href="/terms/">Terms</a>
-  <a href="/privacy/">Privacy</a>
-  <a href="/contact/">Contact</a>
-</nav>
-<p class="badge">Legal</p>
-<h1>Privacy Policy</h1>
-<p class="muted">Last updated: 7 September 2026</p>
-<div class="card">
-<h2 style="margin-top:0">What we collect</h2>
-<ul>
-<li>Account email and profile fields you provide (e.g. developer name, payout wallet)</li>
-<li>App listings, reviews, and support messages you submit</li>
-<li>Basic technical data needed to run the site (e.g. visit logs for store analytics)</li>
-<li>On-chain payment data is public on Polygon by nature of the blockchain</li>
-</ul>
-<h2>How we use it</h2>
-<ul>
-<li>To operate accounts, listings, and downloads</li>
-<li>To review apps and respond to support</li>
-<li>To improve the product and prevent abuse</li>
-</ul>
-<h2>Sharing</h2>
-<p>We use infrastructure providers (e.g. hosting, database, auth). We do not sell your email list. Wallet addresses you publish as payout destinations are visible in product flows related to payment.</p>
-<h2>Retention</h2>
-<p>We keep account and listing data while your account is active and as needed for security and legal reasons.</p>
-<h2>Contact</h2>
-<p>Privacy questions: see <a href="/contact/">Contact</a>.</p>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Privacy · NexaStore</title>
+  <meta name="description" content="Privacy policy for NexaStore."/>
+  <link rel="canonical" href="https://app.nexapulse.pro/privacy/"/>
+  <meta name="theme-color" content="#050505"/>
+  <link rel="icon" href="/branding/nexapulse-favicon-32.png"/>
+  <link rel="apple-touch-icon" href="/branding/nexapulse-seal.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root { --muted:#8b8b96; --line:rgba(255,255,255,.08); }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Inter,system-ui,sans-serif;background:#050505;color:#e8e8ec;line-height:1.6;min-height:100vh}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(120,120,140,.16),transparent 55%)}
+    .wrap{position:relative;z-index:1;max-width:800px;margin:0 auto;padding:20px 20px 80px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 24px}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#c8c8d0;font-weight:700;font-size:14px}
+    .brand img{width:36px;height:36px;border-radius:50%;object-fit:cover;box-shadow:0 0 24px rgba(180,180,200,.12)}
+    .nav a{color:var(--muted);font-size:12px;font-weight:600;margin-left:10px;text-decoration:none}
+    .nav a:hover{color:#fff}
+    h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:800;letter-spacing:-.03em;margin:12px 0 8px;
+      background:linear-gradient(180deg,#fff 0%,#c0c0c8 45%,#8a8a92 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .muted{color:var(--muted);font-size:.92rem}
+    .card{margin-top:18px;padding:22px;border-radius:18px;background:linear-gradient(165deg,rgba(32,32,38,.92),rgba(12,12,14,.96));
+      border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 16px 40px rgba(0,0,0,.35)}
+    .card h2{font-size:1rem;font-weight:700;margin:0 0 10px;color:#f0f0f4}
+    .card p,.card li{font-size:14px;color:#a8a8b2;margin-bottom:10px}
+    .card ul{padding-left:1.15rem;margin:8px 0}
+    .cta{display:inline-flex;margin-top:8px;padding:12px 22px;border-radius:999px;font-weight:700;font-size:13px;color:#0a0a0c;text-decoration:none;
+      background:linear-gradient(180deg,#f2f2f6,#b8b8c0 45%,#e8e8ee 55%,#909098);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 10px 28px rgba(0,0,0,.45)}
+    footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);text-align:center;font-size:12px;color:#6a6a74}
+    footer a{color:#9a9aa5;margin:0 8px;text-decoration:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/"><img src="/branding/nexapulse-seal.png" alt=""/>NexaStore</a>
+    <nav class="nav">
+      <a href="/">Store</a>
+      <a href="/affiliates/">Affiliates</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+    </nav>
+  </header>
+  
+  <p class="muted">Legal</p>
+  <h1>Privacy</h1>
+  <div class="card">
+    <h2>What we store</h2>
+    <p>Account email, profile fields you set, app listings, order metadata needed for purchases, and basic analytics such as visit counts.</p>
+    <h2>Wallets</h2>
+    <p>Wallet addresses you connect or enter may be stored to complete payouts or checkout. We do not custodial-hold your private keys.</p>
+    <h2>Contact</h2>
+    <p>Questions: use the <a href="/contact/" style="color:#ddd">contact page</a>.</p>
+  </div>
+
+  <footer>
+    <p>NexaPulse Studios</p>
+    <p style="margin-top:10px">
+      <a href="/">Store</a><a href="/affiliates/">Affiliates</a><a href="/terms/">Terms</a><a href="/privacy/">Privacy</a>
+    </p>
+  </footer>
 </div>
-<p class="muted"><a href="/">← Back to NexaStore</a></p>
-</div></body></html>
+</body>
+</html>

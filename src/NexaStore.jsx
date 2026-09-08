@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import StudioTutorialPlayer from './StudioTutorialPlayer.jsx';
-import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy } from 'lucide-react';
+import { Search, Download, Home, Compass, Grid, TrendingUp, Bell, Package, Heart, ChevronRight, Zap, Wrench, Code, X, Gamepad2, Play, DollarSign, Star, CheckSquare, Eye, EyeOff, LogOut, Upload, Image as ImageIcon, FileArchive, Share2, User, ArrowLeft, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Wallet, ExternalLink, Lock, BarChart3, Pencil, BookOpen, ChevronLeft, MessageCircle, LifeBuoy, MoreVertical } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const SUPABASE_URL = "https://mapswtriwoxlscjdakpk.supabase.co";
@@ -2520,9 +2520,13 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
   return (
     <div className={shellClass} style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className={`sticky top-0 z-10 border-b px-4 py-3 flex items-center gap-3 ${portal ? 'bg-[#050505]/95 border-white/10' : `${bg} ${border}`}`}>
-        <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark || portal ? 'hover:bg-white/10 text-white' : 'hover:bg-gray-100'} ${portal ? 'text-white' : text}`}>
-          <ArrowLeft size={20} />
-        </button>
+        {portal ? (
+          <a href="/" className="text-[12px] font-semibold text-zinc-400 hover:text-white px-2 py-1.5 rounded-lg border border-white/10 mr-1">Store</a>
+        ) : (
+          <button type="button" onClick={onClose} className={`p-2 -ml-2 rounded-lg hover:bg-gray-100 ${text}`}>
+            <ArrowLeft size={20} />
+          </button>
+        )}
         <div className="min-w-0 flex-1 flex items-center gap-2">
           {portal && (
             <img src="/branding/nexapulse-seal.png" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
@@ -5548,7 +5552,7 @@ function AffiliatePortal({ session, profile, paidApps, showToast, onAuth, onSign
             <AffiliateDashboard
               session={session}
               profile={profile}
-              onClose={goStore}
+              onClose={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               dark={true}
               showToast={showToast}
               paidApps={paidApps}
@@ -5831,7 +5835,11 @@ export default function NexaStore() {
   };
   void ownedTick;
 
-  const isAffiliatePath = typeof window !== 'undefined' && /^\/affiliates\/?$/.test(window.location.pathname);
+  const isAffiliatePath = typeof window !== 'undefined' && (
+    /^\/affiliates\/?$/i.test(window.location.pathname)
+    || window.location.search.includes('portal=affiliate')
+    || window.location.hash === '#affiliate'
+  );
   if (isAffiliatePath) {
     return (
       <AffiliatePortal

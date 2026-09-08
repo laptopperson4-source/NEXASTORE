@@ -1,55 +1,74 @@
 <!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>How payments work · NexaStore</title>
-<meta name="description" content="How NexaStore USDT payments on Polygon work, who receives funds, and risks."/>
-<link rel="canonical" href="https://app.nexapulse.pro/payments/"/>
-<style>
-  body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
-  a{color:#6d28d9} .wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
-  h1{font-size:1.75rem;margin:0 0 8px} h2{font-size:1.15rem;margin:28px 0 8px}
-  .muted{color:#64748b;font-size:0.95rem} .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin:16px 0}
-  nav a{margin-right:14px;font-size:0.9rem;font-weight:600;text-decoration:none;color:#475569}
-  nav a:hover{color:#6d28d9} .badge{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:0.75rem;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:12px}
-</style>
-</head><body><div class="wrap">
-<nav>
-  <a href="/">NexaStore</a>
-  <a href="/about/">About</a>
-  <a href="/payments/">Payments</a>
-  <a href="/terms/">Terms</a>
-  <a href="/privacy/">Privacy</a>
-  <a href="/contact/">Contact</a>
-</nav>
-<p class="badge">Payment mechanics</p>
-<h1>How payments work</h1>
-<p class="muted">Last updated: 7 September 2026 · Read before sending any crypto</p>
-<div class="card">
-<h2 style="margin-top:0">Network</h2>
-<p>Paid apps are priced in <strong>USDT on Polygon</strong> (chain ID <strong>137</strong>). USDT on other networks (Ethereum, BSC, TRC-20, etc.) is <strong>not</strong> accepted for NexaStore unlocks and can be lost if sent to the wrong network.</p>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Payments · NexaStore</title>
+  <meta name="description" content="How USDT payments work on NexaStore — Polygon, gas, and confirmations."/>
+  <link rel="canonical" href="https://app.nexapulse.pro/payments/"/>
+  <meta name="theme-color" content="#050505"/>
+  <link rel="icon" href="/branding/nexapulse-favicon-32.png"/>
+  <link rel="apple-touch-icon" href="/branding/nexapulse-seal.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root { --muted:#8b8b96; --line:rgba(255,255,255,.08); }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Inter,system-ui,sans-serif;background:#050505;color:#e8e8ec;line-height:1.6;min-height:100vh}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(120,120,140,.16),transparent 55%)}
+    .wrap{position:relative;z-index:1;max-width:800px;margin:0 auto;padding:20px 20px 80px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 24px}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#c8c8d0;font-weight:700;font-size:14px}
+    .brand img{width:36px;height:36px;border-radius:50%;object-fit:cover;box-shadow:0 0 24px rgba(180,180,200,.12)}
+    .nav a{color:var(--muted);font-size:12px;font-weight:600;margin-left:10px;text-decoration:none}
+    .nav a:hover{color:#fff}
+    h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:800;letter-spacing:-.03em;margin:12px 0 8px;
+      background:linear-gradient(180deg,#fff 0%,#c0c0c8 45%,#8a8a92 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .muted{color:var(--muted);font-size:.92rem}
+    .card{margin-top:18px;padding:22px;border-radius:18px;background:linear-gradient(165deg,rgba(32,32,38,.92),rgba(12,12,14,.96));
+      border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 16px 40px rgba(0,0,0,.35)}
+    .card h2{font-size:1rem;font-weight:700;margin:0 0 10px;color:#f0f0f4}
+    .card p,.card li{font-size:14px;color:#a8a8b2;margin-bottom:10px}
+    .card ul{padding-left:1.15rem;margin:8px 0}
+    .cta{display:inline-flex;margin-top:8px;padding:12px 22px;border-radius:999px;font-weight:700;font-size:13px;color:#0a0a0c;text-decoration:none;
+      background:linear-gradient(180deg,#f2f2f6,#b8b8c0 45%,#e8e8ee 55%,#909098);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 10px 28px rgba(0,0,0,.45)}
+    footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);text-align:center;font-size:12px;color:#6a6a74}
+    footer a{color:#9a9aa5;margin:0 8px;text-decoration:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/"><img src="/branding/nexapulse-seal.png" alt=""/>NexaStore</a>
+    <nav class="nav">
+      <a href="/">Store</a>
+      <a href="/affiliates/">Affiliates</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+    </nav>
+  </header>
+  
+  <p class="muted">Checkout</p>
+  <h1>Payments</h1>
+  <div class="card">
+    <h2>USDT on Polygon only</h2>
+    <p>Paid apps are priced in USDT. Send on the <strong style="color:#e8e8ec">Polygon</strong> network to the address shown at checkout. Other networks or tokens can mean lost funds.</p>
+  </div>
+  <div class="card">
+    <h2>Network gas</h2>
+    <p>Polygon requires a small amount of <strong style="color:#e8e8ec">POL</strong> for gas. That fee goes to the network, not to NexaStore as a commission.</p>
+  </div>
+  <div class="card">
+    <h2>Confirmations</h2>
+    <p>We wait for multiple block confirmations before unlocking a purchase so reorgs are less likely to cause double-spend issues.</p>
+  </div>
+  <p style="margin-top:20px"><a class="cta" href="/">Back to store</a></p>
+  
+  <footer>
+    <p>NexaPulse Studios</p>
+    <p style="margin-top:10px">
+      <a href="/">Store</a><a href="/affiliates/">Affiliates</a><a href="/terms/">Terms</a><a href="/privacy/">Privacy</a>
+    </p>
+  </footer>
 </div>
-<div class="card">
-<h2 style="margin-top:0">Who receives the money</h2>
-<p>In the default flow, the buyer sends USDT to the <strong>developer payout wallet</strong> shown for that app (Polygon address). NexaStore’s stated model is <strong>direct to developer</strong> with <strong>no platform commission</strong> on that transfer.</p>
-<p>If a developer has not set a payout wallet, a platform fallback address may be used so checkout can still complete. We document that clearly in the product when it applies.</p>
-<p>On-chain transfers are final. There is no card-style chargeback.</p>
-</div>
-<div class="card">
-<h2 style="margin-top:0">Fees</h2>
-<p>You need enough Polygon USDT for the app price and a small amount of <strong>POL</strong> for network gas. Gas is paid to the network, not to NexaStore as a commission.</p>
-</div>
-<div class="card">
-<h2 style="margin-top:0">Risks (honest)</h2>
-<ul>
-<li>Send only the listed amount on Polygon to the address shown in checkout.</li>
-<li>Wrong network or wrong address usually cannot be reversed.</li>
-<li>The marketplace is early; treat small test amounts as the safe way to learn the flow.</li>
-</ul>
-</div>
-<div class="card">
-<h2 style="margin-top:0">Who pays network gas</h2>
-<p>On a normal Polygon transfer from the buyer’s wallet (e.g. MetaMask), <strong>network gas (POL)</strong> is paid by the wallet that sends the transaction — the buyer. The app price in USDT is separate.</p>
-<p>Having the <em>developer</em> pay gas for every customer requires sponsored transactions (paymaster / relayer), which is not the default MetaMask “send USDT” flow. Until that is built, buyers need a little POL for gas in addition to the USDT price.</p>
-</div>
-<p class="muted"><a href="/">← Back to NexaStore</a></p>
-</div></body></html>
+</body>
+</html>

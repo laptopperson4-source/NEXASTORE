@@ -1,47 +1,71 @@
 <!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Terms of Service · NexaStore</title>
-<meta name="description" content="Terms of use for NexaStore marketplace."/>
-<link rel="canonical" href="https://app.nexapulse.pro/terms/"/>
-<style>
-  body{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.6}
-  a{color:#6d28d9} .wrap{max-width:720px;margin:0 auto;padding:40px 20px 80px}
-  h1{font-size:1.75rem;margin:0 0 8px} h2{font-size:1.15rem;margin:28px 0 8px}
-  .muted{color:#64748b;font-size:0.95rem} .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin:16px 0}
-  nav a{margin-right:14px;font-size:0.9rem;font-weight:600;text-decoration:none;color:#475569}
-  nav a:hover{color:#6d28d9} .badge{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:0.75rem;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:12px}
-</style>
-</head><body><div class="wrap">
-<nav>
-  <a href="/">NexaStore</a>
-  <a href="/about/">About</a>
-  <a href="/payments/">Payments</a>
-  <a href="/terms/">Terms</a>
-  <a href="/privacy/">Privacy</a>
-  <a href="/contact/">Contact</a>
-</nav>
-<p class="badge">Legal</p>
-<h1>Terms of Service</h1>
-<p class="muted">Last updated: 7 September 2026 · Early-stage product</p>
-<div class="card">
-<p>By using NexaStore you agree to these terms. If you do not agree, do not use the service.</p>
-<h2>1. The service</h2>
-<p>NexaStore is a marketplace for software listings operated by NexaPulse Studios. We may change features, suspend access, or remove listings when needed for safety or policy reasons.</p>
-<h2>2. Accounts</h2>
-<p>You are responsible for your login credentials and for activity under your account. Provide accurate information when publishing apps.</p>
-<h2>3. Developer listings</h2>
-<p>You may only upload software you have rights to distribute. Listings must not include malware, fraud, or illegal content. We may reject or remove apps that fail review or violate these terms.</p>
-<h2>4. Payments</h2>
-<p>Paid apps use cryptocurrency (USDT on Polygon) as described on the <a href="/payments/">Payments</a> page. Blockchain transactions are irreversible. Platform commission on the direct-to-developer flow is stated as zero; network gas is separate.</p>
-<h2>5. Refunds and disputes</h2>
-<p>Because payments are on-chain, classic chargebacks do not exist. If an app file is missing or clearly not as described, contact us with your order details. We will review case by case; recovery of mis-sent crypto is often impossible.</p>
-<h2>6. No warranty</h2>
-<p>The store and apps are provided “as is.” Indie software may have bugs. We do not guarantee uptime, sales volume, or fitness for a particular purpose.</p>
-<h2>7. Limitation of liability</h2>
-<p>To the maximum extent allowed by law, NexaPulse Studios is not liable for indirect or consequential losses, including lost crypto due to user error (wrong network/address).</p>
-<h2>8. Contact</h2>
-<p>See <a href="/contact/">Contact</a>.</p>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Terms · NexaStore</title>
+  <meta name="description" content="Terms of use for NexaStore."/>
+  <link rel="canonical" href="https://app.nexapulse.pro/terms/"/>
+  <meta name="theme-color" content="#050505"/>
+  <link rel="icon" href="/branding/nexapulse-favicon-32.png"/>
+  <link rel="apple-touch-icon" href="/branding/nexapulse-seal.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root { --muted:#8b8b96; --line:rgba(255,255,255,.08); }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Inter,system-ui,sans-serif;background:#050505;color:#e8e8ec;line-height:1.6;min-height:100vh}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(120,120,140,.16),transparent 55%)}
+    .wrap{position:relative;z-index:1;max-width:800px;margin:0 auto;padding:20px 20px 80px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 24px}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#c8c8d0;font-weight:700;font-size:14px}
+    .brand img{width:36px;height:36px;border-radius:50%;object-fit:cover;box-shadow:0 0 24px rgba(180,180,200,.12)}
+    .nav a{color:var(--muted);font-size:12px;font-weight:600;margin-left:10px;text-decoration:none}
+    .nav a:hover{color:#fff}
+    h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:800;letter-spacing:-.03em;margin:12px 0 8px;
+      background:linear-gradient(180deg,#fff 0%,#c0c0c8 45%,#8a8a92 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .muted{color:var(--muted);font-size:.92rem}
+    .card{margin-top:18px;padding:22px;border-radius:18px;background:linear-gradient(165deg,rgba(32,32,38,.92),rgba(12,12,14,.96));
+      border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 16px 40px rgba(0,0,0,.35)}
+    .card h2{font-size:1rem;font-weight:700;margin:0 0 10px;color:#f0f0f4}
+    .card p,.card li{font-size:14px;color:#a8a8b2;margin-bottom:10px}
+    .card ul{padding-left:1.15rem;margin:8px 0}
+    .cta{display:inline-flex;margin-top:8px;padding:12px 22px;border-radius:999px;font-weight:700;font-size:13px;color:#0a0a0c;text-decoration:none;
+      background:linear-gradient(180deg,#f2f2f6,#b8b8c0 45%,#e8e8ee 55%,#909098);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 10px 28px rgba(0,0,0,.45)}
+    footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);text-align:center;font-size:12px;color:#6a6a74}
+    footer a{color:#9a9aa5;margin:0 8px;text-decoration:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/"><img src="/branding/nexapulse-seal.png" alt=""/>NexaStore</a>
+    <nav class="nav">
+      <a href="/">Store</a>
+      <a href="/affiliates/">Affiliates</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+    </nav>
+  </header>
+  
+  <p class="muted">Legal</p>
+  <h1>Terms of use</h1>
+  <div class="card">
+    <h2>Early product</h2>
+    <p>NexaStore is an early-stage marketplace. Features, policies, and availability can change.</p>
+    <h2>Accounts & apps</h2>
+    <p>You are responsible for your account, wallet actions, and any apps you publish. We may reject or remove apps that break the law or harm users.</p>
+    <h2>Payments</h2>
+    <p>Crypto transactions are irreversible once confirmed on-chain. Double-check network and address before sending.</p>
+    <h2>Affiliates</h2>
+    <p>Affiliate credit applies only to confirmed purchases with a valid code. Fraudulent traffic may be blocked without payout.</p>
+  </div>
+
+  <footer>
+    <p>NexaPulse Studios</p>
+    <p style="margin-top:10px">
+      <a href="/">Store</a><a href="/affiliates/">Affiliates</a><a href="/terms/">Terms</a><a href="/privacy/">Privacy</a>
+    </p>
+  </footer>
 </div>
-<p class="muted"><a href="/">← Back to NexaStore</a></p>
-</div></body></html>
+</body>
+</html>
