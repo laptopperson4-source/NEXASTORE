@@ -3252,7 +3252,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         total_size_bytes: appFile.size,
         status: 'pending',
         dev_id: profile.id,
-        developer_name: publicDevName(profile) || null,
+        // developer display name lives on profiles.display_name — not apps.developer_name
       }, session);
       appId = inserted[0].id;
 
