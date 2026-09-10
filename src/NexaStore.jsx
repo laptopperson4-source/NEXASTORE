@@ -3364,6 +3364,8 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     setEditSaving(true);
     try {
       const appId = editingApp.id;
+      // Match id + dev_id so RLS "own apps only" policies succeed
+      const appMatch = { id: appId, dev_id: profile.id };
       await sbUpdate('apps', {
         name: editForm.name.trim(),
         tagline: editForm.tagline.trim(),
@@ -3372,14 +3374,31 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         price: parseFloat(editForm.price) || 0,
         version: editForm.version.trim() || '1.0.0',
         release_notes: editForm.releaseNotes.trim(),
-      }, { id: appId }, session);
+      }, appMatch, session);
 
       if (editLogoFile) {
         await sbUpload('nexastore-logos', `${appId}/logo.png`, editLogoFile, session);
         const logoUrl = `${STORAGEAPI}/object/public/nexastore-logos/${appId}/logo.png?t=${Date.now()}`;
-        await sbUpdate('apps', { logo_url: logoUrl }, { id: appId }, session).catch(() => {});
+        await sbUpdate('apps', { logo_url: logoUrl }, appMatch, session).catch(() => {});
       }
 
+      // Replace only slots the user picked a new file for (keep others)
+      for (const slot of editSsSlots) {
+        if (!slot.file) continue;
+        const i = slot.index;
+        await sbUpload('nexastore-screenshots', `${appId}/${i}.png`, slot.file, session);
+        const ssUrl = `${STORAGEAPI}/object/public/nexastore-screenshots/${appId}/${i}.png?t=${Date.now()}`;
+        // Delete existing row for this index then insert (upsert-like)
+        try {
+          await fetch(`${REST}/app_screenshots?app_id=eq.${appId}&screenshot_index=eq.${i}`, {
+            method: 'DELETE',
+            headers: { apikey: ANON_KEY, Authorization: `Bearer ${session}` },
+          });
+        } catch {}
+        await sbInsert('app_screenshots', { app_id: appId, screenshot_index: i, screenshot_url: ssUrl }, session).catch(() => {});
+      }
+
+      // Legacy bulk multi-select still supported if used
       if (editScreenshots.length > 0) {
         await sbDelete('app_screenshots', { app_id: appId }, session).catch(() => {});
         for (let i = 0; i < editScreenshots.length; i++) {
@@ -3404,13 +3423,14 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
           file_name: editAppFile.name,
           total_size_bytes: editAppFile.size,
           bit_count: chunks.length,
-        }, { id: appId }, session).catch(() => {});
+        }, appMatch, session).catch(() => {});
       }
 
       showToast?.('App updated', 'success');
       setEditingApp(null);
       setEditLogoFile(null);
       setEditScreenshots([]);
+      setEditSsSlots([]);
       setEditAppFile(null);
       await loadMyApps();
       onPublished?.();
@@ -3684,12 +3704,49 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
                       <input className={inputCls} value={editForm.version} onChange={setEdit('version')} placeholder="Version" />
                       <input className={inputCls} value={editForm.releaseNotes} onChange={setEdit('releaseNotes')} placeholder="Release notes" />
                     </div>
-                    <p className={`text-[12px] font-semibold ${text}`}>Optional media (replace on save)</p>
+                    <p className={`text-[12px] font-semibold ${text}`}>Optional media (only what you change is replaced)</p>
                     <FileDropField label="App icon / logo" hint="Square PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)} files={editLogoFile} dark={dark} />
-                    <FileDropField label="Screenshots" hint="Select all new screenshots (replaces old)" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setEditScreenshots(Array.from(e.target.files || []))} files={editScreenshots} dark={dark} />
+                    <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'border-white/10' : 'border-gray-200'}`}>
+                      <p className={`text-[12px] font-bold ${text}`}>Screenshots — replace one at a time</p>
+                      <p className={`text-[11px] ${subtext}`}>Pick a new image for a slot to replace only that screenshot. Empty slots stay as they are.</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {editSsSlots.map((slot, si) => (
+                          <label key={slot.index} className={`relative aspect-[9/16] max-h-36 rounded-lg overflow-hidden border cursor-pointer ${dark ? 'border-white/15 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
+                            {(slot.file || slot.url) ? (
+                              <img
+                                src={slot.file ? URL.createObjectURL(slot.file) : slot.url}
+                                alt={`Screenshot ${slot.index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${subtext}`}>Slot {slot.index + 1}</span>
+                            )}
+                            <span className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-bold text-white bg-black/50 rounded py-0.5">
+                              {slot.file ? 'New' : 'Replace'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] || null;
+                                setEditSsSlots((prev) => prev.map((s, j) => (j === si ? { ...s, file: f } : s)));
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditSsSlots((prev) => [...prev, { index: prev.length, url: null, file: null }])}
+                        className={`text-[12px] font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}
+                      >
+                        + Add screenshot slot
+                      </button>
+                    </div>
                     <FileDropField label="App file" hint="New APK / ZIP / EXE (optional)" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setEditAppFile(e.target.files?.[0] || null)} files={editAppFile} dark={dark} />
                     <div className="flex gap-2 pt-1">
-                      <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditAppFile(null); }} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
+                      <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditSsSlots([]); setEditAppFile(null); }} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
                       <button type="button" onClick={saveEdit} disabled={editSaving} className="flex-1 py-2.5 rounded-xl font-bold text-[13px] text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">{editSaving ? 'Saving…' : 'Save changes'}</button>
                     </div>
                   </div>
@@ -5699,9 +5756,13 @@ export default function NexaStore() {
       setSession(restored.token);
       try {
         const profiles = await sbSelect('profiles', `id=eq.${restored.user.id}`, restored.token);
-        setProfile(mergeDevProfile(profiles?.[0] || { id: restored.user.id, email: restored.user.email, is_owner: false }));
+        let prof = mergeDevProfile(profiles?.[0] || { id: restored.user.id, email: restored.user.email, is_owner: false });
+        prof = await linkVisitorIdToProfile(prof, restored.token);
+        setProfile(prof);
       } catch (e) {
-        setProfile(mergeDevProfile({ id: restored.user.id, email: restored.user.email, is_owner: false }));
+        let prof = mergeDevProfile({ id: restored.user.id, email: restored.user.email, is_owner: false });
+        prof = await linkVisitorIdToProfile(prof, restored.token);
+        setProfile(prof);
       }
     });
   }, []);
