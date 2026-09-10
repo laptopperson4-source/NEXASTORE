@@ -388,13 +388,30 @@ async function resolvePayoutWallet(app) {
 function getVisitorId() {
   try {
     let id = localStorage.getItem('nexastore_vid');
-    if (!id) {
-      id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    if (!id || id === 'anon') {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        id = 'v_' + crypto.randomUUID().replace(/-/g, '');
+      } else {
+        id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
       localStorage.setItem('nexastore_vid', id);
     }
     return id;
   } catch {
     return 'anon';
+  }
+}
+
+/** Attach this browser's permanent visitor id to the logged-in profile (best-effort). */
+async function linkVisitorIdToProfile(profile, token) {
+  if (!profile?.id || !token) return profile;
+  const vid = getVisitorId();
+  if (!vid || vid === 'anon') return { ...profile, browser_id: profile.browser_id || vid };
+  try {
+    await sbUpdate('profiles', { browser_id: vid }, { id: profile.id }, token);
+    return { ...profile, browser_id: vid };
+  } catch {
+    return { ...profile, browser_id: profile.browser_id || vid };
   }
 }
 
@@ -3130,6 +3147,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
   const [editSaving, setEditSaving] = useState(false);
   const [editLogoFile, setEditLogoFile] = useState(null);
   const [editScreenshots, setEditScreenshots] = useState([]);
+  const [editSsSlots, setEditSsSlots] = useState([]);
   const [editAppFile, setEditAppFile] = useState(null);
   const [setupName, setSetupName] = useState('');
   const [setupCompany, setSetupCompany] = useState('');
@@ -3343,7 +3361,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     }
   };
 
-  const startEdit = (app) => {
+  const startEdit = async (app) => {
     setEditingApp(app);
     setEditForm({
       name: app.name || '',
@@ -3357,6 +3375,27 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     setEditLogoFile(null);
     setEditScreenshots([]);
     setEditAppFile(null);
+    setEditSsSlots([
+      { index: 0, url: null, file: null },
+      { index: 1, url: null, file: null },
+      { index: 2, url: null, file: null },
+    ]);
+    try {
+      const rows = await sbSelect(
+        'app_screenshots',
+        `app_id=eq.${app.id}&select=screenshot_index,screenshot_url&order=screenshot_index.asc`,
+        session
+      );
+      const slots = (rows || []).map((r) => ({
+        index: r.screenshot_index,
+        url: r.screenshot_url,
+        file: null,
+      }));
+      while (slots.length < 3) slots.push({ index: slots.length, url: null, file: null });
+      setEditSsSlots(slots);
+    } catch {
+      /* keep default empty slots */
+    }
   };
 
   const saveEdit = async () => {
@@ -5872,18 +5911,29 @@ export default function NexaStore() {
       ? { access_token: sessionOrToken }
       : sessionOrToken;
     const token = session.access_token;
+    if (!token) {
+      showToast('Sign in failed — no session. Try again.', 'error');
+      return;
+    }
     saveAuthSession(session);
     setSession(token);
+    setShowAuthModal(false);
     sbGetProfile(token).then(async (user) => {
       if (user) {
         try {
           const profiles = await sbSelect('profiles', `id=eq.${user.id}`, token);
-          setProfile(mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false }));
+          let prof = mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false });
+          prof = await linkVisitorIdToProfile(prof, token);
+          setProfile(prof);
+          showToast(`Signed in as ${prof.email || user.email}`, 'success');
         } catch (e) {
-          setProfile(mergeDevProfile({ id: user.id, email: user.email, is_owner: false }));
+          let prof = mergeDevProfile({ id: user.id, email: user.email, is_owner: false });
+          prof = await linkVisitorIdToProfile(prof, token);
+          setProfile(prof);
+          showToast(`Signed in as ${user.email || 'user'}`, 'success');
         }
       }
-    });
+    }).catch((e) => showToast(e.message || 'Could not load profile', 'error'));
   };
 
   const handleSignOut = () => {
