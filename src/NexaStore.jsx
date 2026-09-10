@@ -588,6 +588,42 @@ function getLocalAvatar(userId) {
   }
 }
 
+/** Resolve avatar URL from profile + local fallback */
+function resolveAvatarUrl(profile) {
+  if (!profile) return null;
+  return profile.avatar_url || (profile.id ? getLocalAvatar(profile.id) : null) || null;
+}
+
+/** Letter fallback when no photo */
+function avatarInitial(profile) {
+  const s = (profile?.display_name || profile?.developer_name || profile?.email || '?').trim();
+  return (s.charAt(0) || '?').toUpperCase();
+}
+
+/**
+ * Shared user avatar — photo everywhere when available, letter only as fallback.
+ * size: number (px) or Tailwind-like preset via className
+ */
+function UserAvatar({ profile, size = 32, className = '', rounded = 'rounded-full', textClass = '' }) {
+  const url = resolveAvatarUrl(profile);
+  const style = typeof size === 'number' ? { width: size, height: size } : undefined;
+  const base = `overflow-hidden flex items-center justify-center shrink-0 bg-gradient-to-br from-violet-500 to-indigo-600 text-white font-bold ${rounded} ${className}`;
+  if (url) {
+    return (
+      <div className={base} style={style}>
+        <img src={url} alt="" className="w-full h-full object-cover" />
+      </div>
+    );
+  }
+  const font = typeof size === 'number' ? Math.max(11, Math.round(size * 0.38)) : 14;
+  return (
+    <div className={`${base} ${textClass}`} style={style}>
+      <span style={{ fontSize: font }}>{avatarInitial(profile)}</span>
+    </div>
+  );
+}
+
+
 
 
 // --- NexaPulse SSO (PKCE, public client — no secret needed) ---
@@ -2817,13 +2853,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
       {/* Account header */}
       <div className={`rounded-2xl border p-5 flex items-center gap-4 ${card}`}>
         <div className="relative flex-shrink-0">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl overflow-hidden">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              (profile.email || '?').charAt(0).toUpperCase()
-            )}
-          </div>
+          <UserAvatar profile={profile} size={56} rounded="rounded-2xl" className="text-xl" />
           <label className={`absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer shadow-md ${dark ? 'bg-white text-gray-800' : 'bg-violet-600 text-white'}`} title="Upload avatar">
             {avatarBusy ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
             <input type="file" accept="image/*" className="hidden" disabled={avatarBusy} onChange={onPickAvatar} />
@@ -4905,8 +4935,8 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
               </button>
               {session && profile ? (
                 <div className="relative">
-                  <button onClick={() => setShowProfileMenu(v => !v)} className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm">
-                    {profile.email.charAt(0).toUpperCase()}
+                  <button onClick={() => setShowProfileMenu(v => !v)} className="rounded-full focus:outline-none">
+                    <UserAvatar profile={profile} size={36} />
                   </button>
                   {showProfileMenu && (
                     <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-100 rounded-2xl shadow-lg p-3 z-30">
@@ -5186,8 +5216,8 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               <Bell size={20} />
             </button>
             {session && profile ? (
-              <button type="button" onClick={() => setView('profile')} className="w-8 h-8 rounded-full overflow-hidden bg-emerald-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                {avatarSrc ? <img src={avatarSrc} alt="" className="w-full h-full object-cover" /> : (profile.email || '?').charAt(0).toUpperCase()}
+              <button type="button" onClick={() => setView('profile')} className="rounded-full shrink-0 focus:outline-none">
+                <UserAvatar profile={profile} size={32} className="bg-gradient-to-br from-emerald-500 to-teal-600" />
               </button>
             ) : (
               <button type="button" onClick={onOpenAuth} className="text-[12px] font-bold text-emerald-700 px-2.5 py-1 rounded-full bg-emerald-50 shrink-0">
@@ -5395,15 +5425,15 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               </div>
             </div>
             <div className="flex flex-col items-center mt-2">
-              <div className="w-28 h-28 rounded-full overflow-hidden shadow-lg ring-4 ring-white bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-3xl font-extrabold">
-                {session && profile && avatarSrc ? (
-                  <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
-                ) : session && profile ? (
-                  (profile.email || '?').charAt(0).toUpperCase()
-                ) : (
+              {session && profile ? (
+                <div className="shadow-lg ring-4 ring-white rounded-full">
+                  <UserAvatar profile={profile} size={112} className="bg-gradient-to-br from-emerald-500 to-teal-600 text-3xl" />
+                </div>
+              ) : (
+                <div className="w-28 h-28 rounded-full overflow-hidden shadow-lg ring-4 ring-white bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white">
                   <User size={40} strokeWidth={1.8} />
-                )}
-              </div>
+                </div>
+              )}
               <p className="mt-3 text-[20px] font-extrabold text-gray-900 text-center px-4">
                 {session && profile ? displayName : 'Guest'}
               </p>
