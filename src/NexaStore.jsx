@@ -670,10 +670,18 @@ async function startNexaPulseLogin() {
   window.location.href = `${NEXAPULSE_URL}/oauth/authorize?${params}`;
 }
 
+/**
+ * Full SSO bridge:
+ * 1) Exchange code for NexaPulse access token (PKCE)
+ * 2) POST /bridge/nexastore → magic-link token for this email on NexaStore Supabase
+ * 3) Verify with Supabase → real NexaStore session (same as password login)
+ * Returns { access_token, refresh_token, expires_in, user, email } for handleAuth.
+ */
 async function completeNexaPulseLogin(code) {
   const verifier = sessionStorage.getItem('nexapulse_verifier');
   if (!verifier) throw new Error('Missing PKCE verifier — please try signing in again.');
-  const res = await fetch(`${NEXAPULSE_URL}/oauth/token`, {
+
+  const tokenRes = await fetch(`${NEXAPULSE_URL}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -681,18 +689,118 @@ async function completeNexaPulseLogin(code) {
       code,
       client_id: NEXAPULSE_CLIENT_ID,
       code_verifier: verifier,
+      redirect_uri: NEXAPULSE_REDIRECT,
     }),
   });
   sessionStorage.removeItem('nexapulse_verifier');
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'NexaPulse sign-in failed');
+  if (!tokenRes.ok) {
+    const err = await tokenRes.json().catch(() => ({}));
+    throw new Error(err.error_description || err.error || 'NexaPulse token exchange failed');
   }
-  const { access_token } = await res.json();
-  const info = await fetch(`${NEXAPULSE_URL}/oauth/userinfo`, {
-    headers: { Authorization: `Bearer ${access_token}` },
+  const tokenJson = await tokenRes.json();
+  const nexapulseToken = tokenJson.access_token;
+  if (!nexapulseToken) throw new Error('NexaPulse did not return an access token');
+
+  // Bridge: mint a NexaStore Supabase session for this identity
+  const bridgeRes = await fetch(`${NEXAPULSE_URL}/bridge/nexastore`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${nexapulseToken}`,
+    },
+    body: JSON.stringify({}),
   });
-  return info.ok ? info.json() : null;
+  if (!bridgeRes.ok) {
+    const err = await bridgeRes.json().catch(() => ({}));
+    const msg = err.error || err.message || err.msg || `Bridge failed (${bridgeRes.status})`;
+    if (bridgeRes.status === 503 || /service.?role|NEXASTORE_SERVICE/i.test(String(msg))) {
+      throw new Error('NexaPulse bridge is not configured yet (missing NEXASTORE_SERVICE_ROLE_KEY on the auth server).');
+    }
+    throw new Error(msg);
+  }
+  const bridge = await bridgeRes.json();
+  // Accept several possible shapes from the bridge
+  const hashedToken =
+    bridge.hashed_token ||
+    bridge.token_hash ||
+    bridge.token ||
+    bridge.magic_link_token ||
+    bridge.email_otp ||
+    null;
+  const email = bridge.email || bridge.user?.email || null;
+  const otpType = bridge.type || bridge.verify_type || 'magiclink';
+
+  if (!hashedToken && !bridge.access_token) {
+    throw new Error('Bridge returned no session token. Check NEXASTORE_SERVICE_ROLE_KEY on Vercel.');
+  }
+
+  // If bridge already returned a full Supabase session, use it
+  if (bridge.access_token) {
+    return {
+      access_token: bridge.access_token,
+      refresh_token: bridge.refresh_token || null,
+      expires_in: bridge.expires_in || 3600,
+      user: bridge.user || (email ? { email } : null),
+      email: email || bridge.user?.email || null,
+    };
+  }
+
+  // Otherwise verify magic link / OTP with NexaStore Supabase
+  const verifyBody = {
+    type: otpType,
+    token_hash: hashedToken,
+  };
+  // Some Supabase versions want token + email instead of token_hash
+  if (email && !hashedToken.includes('.')) {
+    verifyBody.email = email;
+    verifyBody.token = hashedToken;
+    delete verifyBody.token_hash;
+  }
+
+  let verifyRes = await fetch(`${AUTHAPI}/verify`, {
+    method: 'POST',
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(verifyBody),
+  });
+
+  // Fallback: try token_hash form if email+token failed
+  if (!verifyRes.ok && verifyBody.token) {
+    verifyRes = await fetch(`${AUTHAPI}/verify`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'magiclink', token_hash: hashedToken }),
+    });
+  }
+
+  if (!verifyRes.ok) {
+    const err = await verifyRes.json().catch(() => ({}));
+    throw new Error(
+      err.error_description || err.msg || err.error || `Supabase verify failed (${verifyRes.status})`
+    );
+  }
+  const session = await verifyRes.json();
+  // Shape: { access_token, refresh_token, expires_in, user } or nested under session
+  const access_token = session.access_token || session.session?.access_token;
+  const refresh_token = session.refresh_token || session.session?.refresh_token;
+  const expires_in = session.expires_in || session.session?.expires_in || 3600;
+  const user = session.user || session.session?.user || null;
+  if (!access_token) throw new Error('Supabase verify did not return an access_token');
+
+  return {
+    access_token,
+    refresh_token,
+    expires_in,
+    user,
+    email: user?.email || email || null,
+  };
 }
 
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
@@ -5824,22 +5932,47 @@ export default function NexaStore() {
   };
   const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
 
-  // Handle redirect back from NexaPulse SSO (?code=...)
-  // Identity confirmation only — does not mint a Supabase session yet.
+  // Handle redirect back from NexaPulse SSO (?code=...) → full NexaStore session via bridge
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     if (!code) return;
     window.history.replaceState({}, '', window.location.pathname);
-    completeNexaPulseLogin(code)
-      .then((info) => {
-        if (info?.email) {
-          showToast(`Signed in via NexaPulse as ${info.email}`, 'success');
-        } else {
-          showToast('NexaPulse sign-in completed, but no profile was returned.', 'info');
+    let cancelled = false;
+    (async () => {
+      try {
+        showToast('Finishing NexaPulse sign-in…', 'info');
+        const session = await completeNexaPulseLogin(code);
+        if (cancelled) return;
+        if (!session?.access_token) {
+          showToast('NexaPulse sign-in did not return a session.', 'error');
+          return;
         }
-      })
-      .catch((e) => showToast(e.message || 'NexaPulse sign-in failed', 'error'));
+        // Same path as password login
+        saveAuthSession(session);
+        setSession(session.access_token);
+        setShowAuthModal(false);
+        try {
+          const user = session.user || await sbGetProfile(session.access_token);
+          if (user) {
+            const profiles = await sbSelect('profiles', `id=eq.${user.id}`, session.access_token).catch(() => []);
+            let prof = mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email || session.email, is_owner: false });
+            if (typeof linkVisitorIdToProfile === 'function') {
+              prof = await linkVisitorIdToProfile(prof, session.access_token);
+            }
+            setProfile(prof);
+            showToast(`Signed in via NexaPulse as ${prof.email || session.email || user.email}`, 'success');
+          } else {
+            showToast('Signed in via NexaPulse, but profile could not be loaded.', 'info');
+          }
+        } catch (e) {
+          showToast(e.message || 'Signed in, but profile load failed.', 'info');
+        }
+      } catch (e) {
+        if (!cancelled) showToast(e.message || 'NexaPulse sign-in failed', 'error');
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const isOwned = (app) => {
