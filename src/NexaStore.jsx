@@ -646,7 +646,23 @@ function UserAvatar({ profile, size = 32, className = '', rounded = 'rounded-ful
 // --- NexaPulse SSO (PKCE, public client — no secret needed) ---
 const NEXAPULSE_URL = "https://nexapulse-auth-nexapulse.vercel.app";
 const NEXAPULSE_CLIENT_ID = "nexastore_app_id";
-const NEXAPULSE_REDIRECT = typeof window !== 'undefined' ? window.location.origin + '/' : '';
+/** Must match redirect_uris registered for this client on the NexaPulse auth server. */
+const NEXAPULSE_REDIRECT_ALLOWED = [
+  'https://app.nexapulse.pro/',
+  'https://app.nexapulse.pro',
+];
+function getNexaPulseRedirect() {
+  if (typeof window === 'undefined') return 'https://app.nexapulse.pro/';
+  const originSlash = window.location.origin.replace(/\/?$/, '/') ;
+  // Prefer current origin only if it is an allowed production host
+  if (originSlash.startsWith('https://app.nexapulse.pro')) {
+    return 'https://app.nexapulse.pro/';
+  }
+  // Cloudflare preview / localhost are NOT registered — always use production callback
+  // so authorize succeeds; user lands on app.nexapulse.pro after SSO.
+  return 'https://app.nexapulse.pro/';
+}
+const NEXAPULSE_REDIRECT = getNexaPulseRedirect();
 
 function base64url(bytes) {
   let str = '';
@@ -660,9 +676,10 @@ async function startNexaPulseLogin() {
   const challengeBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   const challenge = base64url(challengeBuf);
   sessionStorage.setItem('nexapulse_verifier', verifier);
+  const redirectUri = getNexaPulseRedirect();
   const params = new URLSearchParams({
     client_id: NEXAPULSE_CLIENT_ID,
-    redirect_uri: NEXAPULSE_REDIRECT,
+    redirect_uri: redirectUri,
     state: crypto.randomUUID(),
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -689,7 +706,7 @@ async function completeNexaPulseLogin(code) {
       code,
       client_id: NEXAPULSE_CLIENT_ID,
       code_verifier: verifier,
-      redirect_uri: NEXAPULSE_REDIRECT,
+      redirect_uri: getNexaPulseRedirect(),
     }),
   });
   sessionStorage.removeItem('nexapulse_verifier');
