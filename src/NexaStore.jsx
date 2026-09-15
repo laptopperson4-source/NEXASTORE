@@ -1607,6 +1607,37 @@ function getNexaPayNetwork(id) {
   return NEXAPAY_NETWORKS.find((n) => n.id === id) || DEFAULT_NEXAPAY_NETWORK;
 }
 
+function networkFromChainId(chainId) {
+  if (chainId == null || chainId === '') return null;
+  const n = Number(chainId);
+  if (!Number.isFinite(n)) {
+    // hex
+    try {
+      const h = String(chainId).toLowerCase();
+      return NEXAPAY_NETWORKS.find((x) => x.chainIdHex.toLowerCase() === h) || null;
+    } catch {
+      return null;
+    }
+  }
+  return NEXAPAY_NETWORKS.find((x) => x.chainId === n) || null;
+}
+
+/** Read current chain from injected wallet (no switch). */
+async function detectWalletNetwork() {
+  const eth = getInjectedProvider();
+  if (!eth) return { ok: false, reason: 'no_provider', network: null, chainId: null };
+  try {
+    const raw = await eth.request({ method: 'eth_chainId' });
+    const chainId = typeof raw === 'string' && raw.startsWith('0x')
+      ? parseInt(raw, 16)
+      : Number(raw);
+    const network = networkFromChainId(chainId) || networkFromChainId(raw);
+    return { ok: true, chainId, chainIdHex: raw, network, supported: !!network };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'detect_failed', network: null, chainId: null };
+  }
+}
+
 function usdtToBaseUnits(amount, decimals = 6) {
   const a = parseFloat(amount);
   if (!Number.isFinite(a) || a <= 0) return '0';
@@ -2054,6 +2085,9 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const [promoCode, setPromoCode] = useState(() => (getPromoFromUrl() || '').toUpperCase());
   const [payNetworkId, setPayNetworkId] = useState('polygon');
   const payNetwork = getNexaPayNetwork(payNetworkId);
+  const [walletDetect, setWalletDetect] = useState({ status: 'idle' }); // idle|loading|done|error
+  const [networkConfirmed, setNetworkConfirmed] = useState(false);
+  const [detectedLabel, setDetectedLabel] = useState('');
   const [firstTime] = useState(() => {
     try { return !localStorage.getItem('nexastore_paid_once'); } catch { return true; }
   });
@@ -2070,6 +2104,41 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
 
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  // Auto-detect wallet network on open + when user switches chain in extension
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setWalletDetect({ status: 'loading' });
+      const res = await detectWalletNetwork();
+      if (cancelled) return;
+      if (!res.ok) {
+        setWalletDetect({ status: 'error', reason: res.reason });
+        setDetectedLabel(res.reason === 'no_provider' ? 'No browser wallet detected' : 'Could not read wallet network');
+        return;
+      }
+      if (res.network) {
+        setPayNetworkId(res.network.id);
+        setDetectedLabel(`${res.network.name} (chain ${res.chainId})`);
+        setNetworkConfirmed(false); // still require explicit confirm
+        setWalletDetect({ status: 'done', supported: true, chainId: res.chainId, networkId: res.network.id });
+      } else {
+        setDetectedLabel(`Unsupported chain ${res.chainId} — pick a network below`);
+        setNetworkConfirmed(false);
+        setWalletDetect({ status: 'done', supported: false, chainId: res.chainId });
+      }
+    };
+    run();
+    const eth = getInjectedProvider();
+    const onChain = () => { if (!cancelled) run(); };
+    try {
+      eth?.on?.('chainChanged', onChain);
+    } catch {}
+    return () => {
+      cancelled = true;
+      try { eth?.removeListener?.('chainChanged', onChain); } catch {}
+    };
   }, []);
 
   const startPolling = (orderId, amount) => {
@@ -2119,8 +2188,28 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   /** Create order then open MetaMask send deep-link with receiver + amount filled */
   const startPayment = async () => {
     setError('');
+    if (!networkConfirmed) {
+      setError(`Confirm you will pay on ${payNetwork.name} before continuing.`);
+      return;
+    }
     setBusy(true);
     try {
+      // Re-check wallet chain matches the confirmed network
+      const det = await detectWalletNetwork();
+      if (det.ok && det.network && det.network.id !== payNetworkId) {
+        setBusy(false);
+        setError(`Wallet is on ${det.network.name}, but you confirmed ${payNetwork.name}. Switch network in your wallet or pick the matching chip, then confirm again.`);
+        setNetworkConfirmed(false);
+        setPayNetworkId(det.network.id);
+        setDetectedLabel(`${det.network.name} (chain ${det.chainId})`);
+        return;
+      }
+      if (det.ok && !det.network && det.chainId != null) {
+        setBusy(false);
+        setError(`Wallet chain ${det.chainId} is not supported. Switch to ${payNetwork.name} in your wallet, then confirm.`);
+        setNetworkConfirmed(false);
+        return;
+      }
       const receiptEmail = (profile && profile.email) || `buyer-${Date.now()}@nexastore.app`;
       const payTo = (PAY_ADDRESS || NEXAPAY_DEPOSIT || '').trim();
       const r = await fetch(WORKER_URL + '/api/create-order', {
@@ -2282,14 +2371,49 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 )}
 
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-[12px] font-bold ${text}`}>Payment network</p>
-                  <p className={`text-[11px] ${subtext}`}>USDT on the network you pick. Gas uses that chain’s native token ({payNetwork.nativeSymbol}).</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-[12px] font-bold ${text}`}>Payment network</p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setWalletDetect({ status: 'loading' });
+                        setNetworkConfirmed(false);
+                        const res = await detectWalletNetwork();
+                        if (!res.ok) {
+                          setWalletDetect({ status: 'error', reason: res.reason });
+                          setDetectedLabel(res.reason === 'no_provider' ? 'No browser wallet detected' : 'Could not read wallet network');
+                          return;
+                        }
+                        if (res.network) {
+                          setPayNetworkId(res.network.id);
+                          setDetectedLabel(`${res.network.name} (chain ${res.chainId})`);
+                          setWalletDetect({ status: 'done', supported: true, chainId: res.chainId, networkId: res.network.id });
+                        } else {
+                          setDetectedLabel(`Unsupported chain ${res.chainId} — pick a supported network`);
+                          setWalletDetect({ status: 'done', supported: false, chainId: res.chainId });
+                        }
+                      }}
+                      className={`text-[11px] font-semibold px-2 py-1 rounded-lg ${dark ? 'bg-white/10 text-violet-200' : 'bg-violet-50 text-violet-700'}`}
+                    >
+                      {walletDetect.status === 'loading' ? 'Detecting…' : 'Detect wallet'}
+                    </button>
+                  </div>
+                  <p className={`text-[11px] ${subtext}`}>
+                    Auto-detect reads your browser wallet’s current chain. Gas uses {payNetwork.nativeSymbol} on {payNetwork.name}.
+                  </p>
+                  {detectedLabel && (
+                    <p className={`text-[11.5px] font-semibold ${
+                      walletDetect.supported === false ? 'text-amber-500' : (dark ? 'text-emerald-300' : 'text-emerald-700')
+                    }`}>
+                      {walletDetect.status === 'loading' ? 'Reading wallet…' : `Wallet: ${detectedLabel}`}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-1.5">
                     {NEXAPAY_NETWORKS.map((n) => (
                       <button
                         key={n.id}
                         type="button"
-                        onClick={() => setPayNetworkId(n.id)}
+                        onClick={() => { setPayNetworkId(n.id); setNetworkConfirmed(false); }}
                         className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
                           payNetworkId === n.id
                             ? 'bg-violet-600 text-white border-violet-500'
@@ -2300,6 +2424,22 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                       </button>
                     ))}
                   </div>
+                  <label className={`flex items-start gap-2.5 mt-1 cursor-pointer rounded-xl border p-2.5 ${
+                    networkConfirmed
+                      ? (dark ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-emerald-300 bg-emerald-50')
+                      : (dark ? 'border-white/15 bg-black/20' : 'border-gray-200 bg-white')
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={networkConfirmed}
+                      onChange={(e) => setNetworkConfirmed(e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                    />
+                    <span className={`text-[12px] leading-snug ${text}`}>
+                      <b>I confirm</b> I will send <b>{lockedPrice} USDT</b> on <b>{payNetwork.name}</b> only.
+                      Wrong network can mean lost funds.
+                    </span>
+                  </label>
                 </div>
 
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
@@ -2329,17 +2469,17 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
                   <p className={`text-[12px] font-bold ${text}`}>2. Pay in this browser</p>
                   <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
-                    Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on  to NexaPay — no extra download pages.
+                    Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on {payNetwork.name} to NexaPay — no extra download pages.
                   </p>
                   {error && <p className="text-xs text-red-400 text-center">{error}</p>}
                   <button
                     type="button"
                     onClick={startPayment}
-                    disabled={busy}
+                    disabled={busy || !networkConfirmed}
                     className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {busy ? <Loader2 size={16} className="animate-spin" /> : null}
-                    {busy ? 'Opening wallet…' : 'Continue to Payment'}
+                    {busy ? 'Opening wallet…' : (!networkConfirmed ? 'Confirm network first' : `Pay on ${payNetwork.name}`)}
                   </button>
                 </div>
 
