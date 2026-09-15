@@ -643,183 +643,6 @@ function UserAvatar({ profile, size = 32, className = '', rounded = 'rounded-ful
 
 
 
-// --- NexaPulse SSO (PKCE, public client — no secret needed) ---
-const NEXAPULSE_URL = "https://nexapulse-auth-nexapulse.vercel.app";
-const NEXAPULSE_CLIENT_ID = "nexastore_app_id";
-/** Must match redirect_uris registered for this client on the NexaPulse auth server. */
-const NEXAPULSE_REDIRECT_ALLOWED = [
-  'https://app.nexapulse.pro/',
-  'https://app.nexapulse.pro',
-];
-function getNexaPulseRedirect() {
-  if (typeof window === 'undefined') return 'https://app.nexapulse.pro/';
-  const originSlash = window.location.origin.replace(/\/?$/, '/') ;
-  // Prefer current origin only if it is an allowed production host
-  if (originSlash.startsWith('https://app.nexapulse.pro')) {
-    return 'https://app.nexapulse.pro/';
-  }
-  // Cloudflare preview / localhost are NOT registered — always use production callback
-  // so authorize succeeds; user lands on app.nexapulse.pro after SSO.
-  return 'https://app.nexapulse.pro/';
-}
-const NEXAPULSE_REDIRECT = getNexaPulseRedirect();
-
-function base64url(bytes) {
-  let str = '';
-  for (const b of new Uint8Array(bytes)) str += String.fromCharCode(b);
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function startNexaPulseLogin() {
-  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
-  const verifier = base64url(verifierBytes);
-  const challengeBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const challenge = base64url(challengeBuf);
-  sessionStorage.setItem('nexapulse_verifier', verifier);
-  const redirectUri = getNexaPulseRedirect();
-  const params = new URLSearchParams({
-    client_id: NEXAPULSE_CLIENT_ID,
-    redirect_uri: redirectUri,
-    state: crypto.randomUUID(),
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-  });
-  window.location.href = `${NEXAPULSE_URL}/oauth/authorize?${params}`;
-}
-
-/**
- * Full SSO bridge:
- * 1) Exchange code for NexaPulse access token (PKCE)
- * 2) POST /bridge/nexastore → magic-link token for this email on NexaStore Supabase
- * 3) Verify with Supabase → real NexaStore session (same as password login)
- * Returns { access_token, refresh_token, expires_in, user, email } for handleAuth.
- */
-async function completeNexaPulseLogin(code) {
-  const verifier = sessionStorage.getItem('nexapulse_verifier');
-  if (!verifier) throw new Error('Missing PKCE verifier — please try signing in again.');
-
-  const tokenRes = await fetch(`${NEXAPULSE_URL}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      code,
-      client_id: NEXAPULSE_CLIENT_ID,
-      code_verifier: verifier,
-      redirect_uri: getNexaPulseRedirect(),
-    }),
-  });
-  sessionStorage.removeItem('nexapulse_verifier');
-  if (!tokenRes.ok) {
-    const err = await tokenRes.json().catch(() => ({}));
-    throw new Error(err.error_description || err.error || 'NexaPulse token exchange failed');
-  }
-  const tokenJson = await tokenRes.json();
-  const nexapulseToken = tokenJson.access_token;
-  if (!nexapulseToken) throw new Error('NexaPulse did not return an access token');
-
-  // Bridge: mint a NexaStore Supabase session for this identity
-  const bridgeRes = await fetch(`${NEXAPULSE_URL}/bridge/nexastore`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${nexapulseToken}`,
-    },
-    body: JSON.stringify({}),
-  });
-  if (!bridgeRes.ok) {
-    const err = await bridgeRes.json().catch(() => ({}));
-    const msg = err.error || err.message || err.msg || `Bridge failed (${bridgeRes.status})`;
-    if (bridgeRes.status === 503 || /service.?role|NEXASTORE_SERVICE/i.test(String(msg))) {
-      throw new Error('NexaPulse bridge is not configured yet (missing NEXASTORE_SERVICE_ROLE_KEY on the auth server).');
-    }
-    throw new Error(msg);
-  }
-  const bridge = await bridgeRes.json();
-  // Accept several possible shapes from the bridge
-  const hashedToken =
-    bridge.hashed_token ||
-    bridge.token_hash ||
-    bridge.token ||
-    bridge.magic_link_token ||
-    bridge.email_otp ||
-    null;
-  const email = bridge.email || bridge.user?.email || null;
-  const otpType = bridge.type || bridge.verify_type || 'magiclink';
-
-  if (!hashedToken && !bridge.access_token) {
-    throw new Error('Bridge returned no session token. Check NEXASTORE_SERVICE_ROLE_KEY on Vercel.');
-  }
-
-  // If bridge already returned a full Supabase session, use it
-  if (bridge.access_token) {
-    return {
-      access_token: bridge.access_token,
-      refresh_token: bridge.refresh_token || null,
-      expires_in: bridge.expires_in || 3600,
-      user: bridge.user || (email ? { email } : null),
-      email: email || bridge.user?.email || null,
-    };
-  }
-
-  // Otherwise verify magic link / OTP with NexaStore Supabase
-  const verifyBody = {
-    type: otpType,
-    token_hash: hashedToken,
-  };
-  // Some Supabase versions want token + email instead of token_hash
-  if (email && !hashedToken.includes('.')) {
-    verifyBody.email = email;
-    verifyBody.token = hashedToken;
-    delete verifyBody.token_hash;
-  }
-
-  let verifyRes = await fetch(`${AUTHAPI}/verify`, {
-    method: 'POST',
-    headers: {
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${ANON_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(verifyBody),
-  });
-
-  // Fallback: try token_hash form if email+token failed
-  if (!verifyRes.ok && verifyBody.token) {
-    verifyRes = await fetch(`${AUTHAPI}/verify`, {
-      method: 'POST',
-      headers: {
-        apikey: ANON_KEY,
-        Authorization: `Bearer ${ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ type: 'magiclink', token_hash: hashedToken }),
-    });
-  }
-
-  if (!verifyRes.ok) {
-    const err = await verifyRes.json().catch(() => ({}));
-    throw new Error(
-      err.error_description || err.msg || err.error || `Supabase verify failed (${verifyRes.status})`
-    );
-  }
-  const session = await verifyRes.json();
-  // Shape: { access_token, refresh_token, expires_in, user } or nested under session
-  const access_token = session.access_token || session.session?.access_token;
-  const refresh_token = session.refresh_token || session.session?.refresh_token;
-  const expires_in = session.expires_in || session.session?.expires_in || 3600;
-  const user = session.user || session.session?.user || null;
-  if (!access_token) throw new Error('Supabase verify did not return an access_token');
-
-  return {
-    access_token,
-    refresh_token,
-    expires_in,
-    user,
-    email: user?.email || email || null,
-  };
-}
-
 const PLATFORM_TREASURY_WALLET = "0xF8720081dc56427AB7851fda9F05754304f0bfb2";
 
 // --- Affiliate / promo codes (pay per confirmed purchase) ---
@@ -1487,14 +1310,6 @@ function AuthModal({ onClose, onAuth }) {
 
         {mode === 'auth' && (
           <>
-            <div className="flex items-center gap-3 my-4">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-[11px] text-gray-400 font-medium">OR</span>
-              <div className="flex-1 h-px bg-gray-200" />
-            </div>
-            <button type="button" onClick={startNexaPulseLogin} className="w-full border border-gray-200 text-gray-700 py-2.5 rounded-xl font-semibold text-[14px] hover:bg-gray-50 transition-colors">
-              Continue with NexaPulse
-            </button>
           </>
         )}
 
@@ -1727,15 +1542,84 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
 }
 
 
-/** Polygon USDT (PoS) — browser extension payment (EIP-1193) */
-const POLYGON_CHAIN_ID = 137;
-const POLYGON_CHAIN_ID_HEX = '0x89';
-const POLYGON_USDT = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'; // 6 decimals
+/** NexaPay multi-network USDT (EIP-1193 browser wallets) */
 const NEXAPAY_DEPOSIT = '0xF8720081dc56427AB7851fda9F05754304f0bfb2';
+const NEXAPAY_NETWORKS = [
+  {
+    id: 'polygon',
+    name: 'Polygon',
+    chainId: 137,
+    chainIdHex: '0x89',
+    usdt: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    decimals: 6,
+    nativeSymbol: 'POL',
+    rpcUrls: ['https://polygon-rpc.com'],
+    explorer: 'https://polygonscan.com',
+  },
+  {
+    id: 'ethereum',
+    name: 'Ethereum',
+    chainId: 1,
+    chainIdHex: '0x1',
+    usdt: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    decimals: 6,
+    nativeSymbol: 'ETH',
+    rpcUrls: ['https://eth.llamarpc.com'],
+    explorer: 'https://etherscan.io',
+  },
+  {
+    id: 'arbitrum',
+    name: 'Arbitrum',
+    chainId: 42161,
+    chainIdHex: '0xa4b1',
+    usdt: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+    decimals: 6,
+    nativeSymbol: 'ETH',
+    rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+    explorer: 'https://arbiscan.io',
+  },
+  {
+    id: 'base',
+    name: 'Base',
+    chainId: 8453,
+    chainIdHex: '0x2105',
+    usdt: '0xfde4C96c8593536E31F126d2f3F4e1F5CBb7bD8c',
+    decimals: 6,
+    nativeSymbol: 'ETH',
+    rpcUrls: ['https://mainnet.base.org'],
+    explorer: 'https://basescan.org',
+  },
+  {
+    id: 'bsc',
+    name: 'BNB Chain',
+    chainId: 56,
+    chainIdHex: '0x38',
+    usdt: '0x55d398326f99059fF775485246999027B3197955',
+    decimals: 18,
+    nativeSymbol: 'BNB',
+    rpcUrls: ['https://bsc-dataseed.binance.org'],
+    explorer: 'https://bscscan.com',
+  },
+];
+const DEFAULT_NEXAPAY_NETWORK = NEXAPAY_NETWORKS[0];
 
-function usdtToBaseUnits(amount) {
-  const n = Math.round(parseFloat(amount) * 1e6);
-  return String(Math.max(0, n));
+function getNexaPayNetwork(id) {
+  return NEXAPAY_NETWORKS.find((n) => n.id === id) || DEFAULT_NEXAPAY_NETWORK;
+}
+
+function usdtToBaseUnits(amount, decimals = 6) {
+  const a = parseFloat(amount);
+  if (!Number.isFinite(a) || a <= 0) return '0';
+  // Avoid float issues: work in string for 6 decimals; for 18 use scaled string
+  if (decimals === 6) {
+    const n = Math.round(a * 1e6);
+    return String(Math.max(0, n));
+  }
+  // 18 decimals: amount * 10^18
+  const [whole, frac = ''] = String(a).split('.');
+  const fracPad = (frac + '0'.repeat(decimals)).slice(0, decimals);
+  const raw = BigInt(whole || '0') * (10n ** BigInt(decimals)) + BigInt(fracPad || '0');
+  return raw.toString();
 }
 
 function isMobileBrowser() {
@@ -1770,46 +1654,51 @@ function walletBuyOpenUrl(wallet) {
   return hit?.url || 'https://portfolio.metamask.io/buy';
 }
 
-function encodeUsdtTransfer(toAddress, amountUsdt) {
+function encodeUsdtTransfer(toAddress, amountUsdt, decimals = 6) {
   const to = (toAddress || NEXAPAY_DEPOSIT).trim().toLowerCase().replace(/^0x/, '');
   if (to.length !== 40) throw new Error('Invalid deposit address');
-  const units = BigInt(usdtToBaseUnits(amountUsdt));
+  const units = BigInt(usdtToBaseUnits(amountUsdt, decimals));
   const paddedTo = to.padStart(64, '0');
   const paddedAmt = units.toString(16).padStart(64, '0');
   // transfer(address,uint256)
   return '0xa9059cbb' + paddedTo + paddedAmt;
 }
 
-async function ensurePolygon(eth) {
+async function ensurePaymentNetwork(eth, network) {
+  const net = network || DEFAULT_NEXAPAY_NETWORK;
   try {
-    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: POLYGON_CHAIN_ID_HEX }] });
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: net.chainIdHex }] });
   } catch (switchErr) {
     if (switchErr?.code === 4902) {
       await eth.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: POLYGON_CHAIN_ID_HEX,
-          chainName: 'Polygon Mainnet',
-          nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-          rpcUrls: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
-          blockExplorerUrls: ['https://polygonscan.com'],
+          chainId: net.chainIdHex,
+          chainName: net.name,
+          nativeCurrency: { name: net.nativeSymbol, symbol: net.nativeSymbol, decimals: 18 },
+          rpcUrls: net.rpcUrls || [],
+          blockExplorerUrls: net.explorer ? [net.explorer] : [],
         }],
       });
     } else if (switchErr?.code === 4001) {
-      throw Object.assign(new Error('Switch to Polygon cancelled'), { code: 4001 });
+      throw Object.assign(new Error(`Switch to ${net.name} cancelled`), { code: 4001 });
     } else {
       throw switchErr;
     }
   }
 }
+/** @deprecated use ensurePaymentNetwork */
+async function ensurePolygon(eth) {
+  return ensurePaymentNetwork(eth, getNexaPayNetwork('polygon'));
+}
 
-/** Read USDT balance (6 decimals) for address on Polygon via eth_call */
-async function getUsdtBalance(eth, owner) {
-  // balanceOf(address)
+/** Read USDT balance for address on the selected network via eth_call */
+async function getUsdtBalance(eth, owner, network) {
+  const net = network || DEFAULT_NEXAPAY_NETWORK;
   const data = '0x70a08231' + owner.replace(/^0x/, '').toLowerCase().padStart(64, '0');
   const raw = await eth.request({
     method: 'eth_call',
-    params: [{ to: POLYGON_USDT, data }, 'latest'],
+    params: [{ to: net.usdt, data }, 'latest'],
   });
   return BigInt(raw || '0x0');
 }
@@ -1823,78 +1712,74 @@ async function getNativeBalance(eth, owner) {
  * Pay USDT via any injected browser extension (MetaMask, Rabby, Coinbase, …).
  * Pre-checks balances so MetaMask does not show scary "likely to fail".
  */
-async function sendUsdtViaBrowserWallet(toAddress, amountUsdt) {
+async function sendUsdtViaBrowserWallet(toAddress, amountUsdt, network) {
+  const net = network || DEFAULT_NEXAPAY_NETWORK;
   const eth = getInjectedProvider();
   if (!eth) return { ok: false, reason: 'no_provider', message: 'Install a browser wallet extension (MetaMask, Rabby, Coinbase, etc.) and refresh.' };
 
   const to = (toAddress || NEXAPAY_DEPOSIT).trim();
-  const need = BigInt(usdtToBaseUnits(amountUsdt));
+  const need = BigInt(usdtToBaseUnits(amountUsdt, net.decimals));
+  const scale = 10 ** net.decimals;
 
   try {
     const accounts = await eth.request({ method: 'eth_requestAccounts' });
     const from = accounts?.[0];
     if (!from) return { ok: false, reason: 'no_account', message: 'Unlock your wallet and connect this site.' };
 
-    await ensurePolygon(eth);
+    await ensurePaymentNetwork(eth, net);
 
-    // Friendly balance checks BEFORE opening the confirm UI
     try {
-      const usdtBal = await getUsdtBalance(eth, from);
+      const usdtBal = await getUsdtBalance(eth, from, net);
       if (usdtBal < need) {
-        const have = Number(usdtBal) / 1e6;
+        const have = Number(usdtBal) / scale;
         return {
           ok: false,
           reason: 'insufficient_usdt',
-          message: `You have ${have.toFixed(2)} USDT on Polygon but need ${amountUsdt}. Buy USDT on Polygon first, then try again.`,
+          message: `You have ${have.toFixed(2)} USDT on ${net.name} but need ${amountUsdt}. Buy USDT on ${net.name} first, then try again.`,
         };
       }
-      const pol = await getNativeBalance(eth, from);
-      // ~0.01 POL is usually enough for a simple ERC-20 transfer
-      if (pol < 1000000000000000n) { // 0.001 POL
+      const native = await getNativeBalance(eth, from);
+      if (native < 1000000000000000n) {
         return {
           ok: false,
           reason: 'insufficient_gas',
-          message: 'Polygon requires a little POL for network gas to send USDT (paid to the network, not to NexaStore or the developer). Add a small amount of POL, then try again.',
+          message: `${net.name} needs a little ${net.nativeSymbol} for network gas to send USDT (paid to the network, not to NexaStore). Add a small amount of ${net.nativeSymbol}, then try again.`,
         };
       }
     } catch {
-      // If balance read fails, still allow user to try (RPC issues)
+      /* RPC issues — still allow attempt */
     }
 
-    const data = encodeUsdtTransfer(to, amountUsdt);
+    const data = encodeUsdtTransfer(to, amountUsdt, net.decimals);
     const txParams = {
       from,
-      to: POLYGON_USDT,
+      to: net.usdt,
       data,
       value: '0x0',
     };
 
-    // Estimate gas so MetaMask is less likely to flag the tx
     try {
       const gas = await eth.request({ method: 'eth_estimateGas', params: [txParams] });
       if (gas) {
-        // +20% buffer
         const g = (BigInt(gas) * 120n) / 100n;
         txParams.gas = '0x' + g.toString(16);
       }
     } catch (estErr) {
-      // estimate failed → almost always balance/allowance; surface clean message
       const msg = (estErr?.message || '').toLowerCase();
       if (msg.includes('insufficient') || msg.includes('transfer amount exceeds')) {
         return {
           ok: false,
           reason: 'insufficient_usdt',
-          message: `Not enough USDT on Polygon for ${amountUsdt} USDT. Buy more, then try again.`,
+          message: `Not enough USDT on ${net.name} for ${amountUsdt} USDT. Buy more, then try again.`,
         };
       }
-      // still proceed without gas so user can see wallet UI
     }
 
     const txHash = await eth.request({
       method: 'eth_sendTransaction',
       params: [txParams],
     });
-    return { ok: true, txHash, from };
+    return { ok: true, txHash, from, network: net.id };
   } catch (e) {
     if (e?.code === 4001) return { ok: false, reason: 'rejected', message: 'Transaction cancelled in wallet.' };
     const raw = e?.message || String(e);
@@ -1903,15 +1788,15 @@ async function sendUsdtViaBrowserWallet(toAddress, amountUsdt) {
   }
 }
 
-// Back-compat alias
-async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt) {
-  return sendUsdtViaBrowserWallet(toAddress, amountUsdt);
+async function sendUsdtViaInjectedMetaMask(toAddress, amountUsdt, network) {
+  return sendUsdtViaBrowserWallet(toAddress, amountUsdt, network);
 }
 
-function metamaskUsdtSendLink(toAddress, amountUsdt) {
+function metamaskUsdtSendLink(toAddress, amountUsdt, network) {
+  const net = network || DEFAULT_NEXAPAY_NETWORK;
   const to = (toAddress || NEXAPAY_DEPOSIT).trim();
-  const units = usdtToBaseUnits(amountUsdt);
-  return `https://metamask.app.link/send/${POLYGON_USDT}@${POLYGON_CHAIN_ID}/transfer?address=${encodeURIComponent(to)}&uint256=${units}`;
+  const units = usdtToBaseUnits(amountUsdt, net.decimals);
+  return `https://metamask.app.link/send/${net.usdt}@${net.chainId}/transfer?address=${encodeURIComponent(to)}&uint256=${units}`;
 }
 
 
@@ -1943,7 +1828,7 @@ function aiSupportReply(userText, ctx = {}) {
   const orderHint = ctx.orderId ? ` Your order reference is ${ctx.orderId}.` : '';
 
   if (/polygon|network|wrong chain|bsc|ethereum|trc|chain id|mainnet|switch network/.test(q)) {
-    return `NexaStore only accepts USDT on Polygon (network / chain ID 137). In ${wallet}, open the network menu and select Polygon Mainnet. USDT sent on Ethereum, BSC, Solana, or TRC-20 will not unlock your app and may not be recoverable.${orderHint}`;
+    return `NexaStore accepts USDT on Polygon, Ethereum, Arbitrum, Base, or BNB Chain — pick the same network in checkout and in ${wallet}. Solana / TON / TRC-20 are not supported and funds sent there cannot unlock the app.${orderHint}`;
   }
   if (/gas|pol|matic|fee|likely to fail|failed|insufficient funds|not enough/.test(q)) {
     return `That warning usually means the wallet is missing gas or USDT. You need: (1) enough Polygon USDT for the exact app price, and (2) a small amount of POL for network fees. Top up USDT on Polygon, keep a little POL, stay on this tab, then try Pay again.`;
@@ -2167,6 +2052,8 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const [copied, setCopied] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
   const [promoCode, setPromoCode] = useState(() => (getPromoFromUrl() || '').toUpperCase());
+  const [payNetworkId, setPayNetworkId] = useState('polygon');
+  const payNetwork = getNexaPayNetwork(payNetworkId);
   const [firstTime] = useState(() => {
     try { return !localStorage.getItem('nexastore_paid_once'); } catch { return true; }
   });
@@ -2192,7 +2079,8 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       try {
         // Prefer on-chain check, fall back to order status
         const checkUrl = WORKER_URL + '/api/check-payment?id=' + encodeURIComponent(orderId)
-          + '&amount=' + encodeURIComponent(amount || lockedPrice);
+          + '&amount=' + encodeURIComponent(amount || lockedPrice)
+          + '&network=' + encodeURIComponent(payNetworkId);
         let sd = await fetch(checkUrl).then(r => r.json()).catch(() => ({}));
         if (!sd.paid && !sd.status) {
           const st = await fetch(WORKER_URL + '/api/order-status?id=' + encodeURIComponent(orderId))
@@ -2243,6 +2131,8 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
           amount: Number(lockedPrice),
           pay_to: payTo,
           app_id: app?.id || null,
+          network: payNetworkId,
+          chain_id: payNetwork.chainId,
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -2258,7 +2148,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
       setStage('pay');
       startPolling(orderId, lockedPrice);
       // Browser extension only (MetaMask / Rabby / Coinbase / …) — no external download page
-      const paid = await sendUsdtViaBrowserWallet(address, lockedPrice);
+      const paid = await sendUsdtViaBrowserWallet(address, lockedPrice, payNetwork);
       if (paid.ok) {
         // keep polling for worker confirmation
       } else if (paid.reason !== 'rejected') {
@@ -2377,7 +2267,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   <div className={`rounded-xl border p-3 ${dark ? 'bg-violet-500/10 border-violet-500/25' : 'bg-violet-50 border-violet-100'}`}>
                     <p className={`text-[12.5px] font-bold ${dark ? 'text-violet-200' : 'text-violet-800'}`}>First time buying?</p>
                     <p className={`text-[11.5px] mt-1 leading-relaxed ${dark ? 'text-violet-200/80' : 'text-violet-700'}`}>
-                      Follow this order: open your wallet → set network to <b>Polygon</b> → buy at least <b>{lockedPrice} USDT</b> (+ a little POL for gas) → come back and pay.
+                      Follow this order: open your wallet → set network to <b>{payNetwork.name}</b> → buy at least <b>{lockedPrice} USDT</b> (+ a little {payNetwork.nativeSymbol} for gas) → come back and pay.
                     </p>
                     {onOpenTutorial && wallet && (
                       <button type="button" onClick={() => {
@@ -2392,7 +2282,28 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 )}
 
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-[12px] font-bold ${text}`}>1. Open wallet · Polygon · buy USDT</p>
+                  <p className={`text-[12px] font-bold ${text}`}>Payment network</p>
+                  <p className={`text-[11px] ${subtext}`}>USDT on the network you pick. Gas uses that chain’s native token ({payNetwork.nativeSymbol}).</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {NEXAPAY_NETWORKS.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => setPayNetworkId(n.id)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                          payNetworkId === n.id
+                            ? 'bg-violet-600 text-white border-violet-500'
+                            : (dark ? 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')
+                        }`}
+                      >
+                        {n.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                  <p className={`text-[12px] font-bold ${text}`}>1. Open wallet · {payNetwork.name} · buy USDT</p>
                   <ol className={`text-[11.5px] space-y-1 list-decimal list-inside leading-relaxed ${subtext}`}>
                     <li>Open <b className={text}>{wallet?.name || 'your wallet'}</b></li>
                     <li>Set network to <b className={text}>Polygon Mainnet</b></li>
@@ -2418,7 +2329,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
                   <p className={`text-[12px] font-bold ${text}`}>2. Pay in this browser</p>
                   <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
-                    Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on Polygon to NexaPay — no extra download pages.
+                    Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on  to NexaPay — no extra download pages.
                   </p>
                   {error && <p className="text-xs text-red-400 text-center">{error}</p>}
                   <button
@@ -2437,7 +2348,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   <MessageCircle size={14} /> Support / feedback
                 </button>
 
-                <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial · Polygon USDT only</p>
+                <p className={`text-[10px] text-center ${subtext}`}>Crypto only · No KYC · Non-custodial · USDT on {payNetwork.name}</p>
               </div>
             )}
 
@@ -2445,7 +2356,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
               <div className="px-4 py-4 space-y-3">
                 <p className={`text-xs text-center ${subtext}`}>Send exactly</p>
                 <p className="text-center text-2xl font-black text-emerald-400">{order.amount} USDT</p>
-                <p className="text-center text-[11px] text-violet-300 font-semibold">on Polygon only</p>
+                <p className="text-center text-[11px] text-violet-300 font-semibold">on {payNetwork.name} only</p>
 
                 <div className={`rounded-xl border p-3 ${dark ? 'bg-slate-900 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
                   <p className={`text-[10px] mb-1 ${subtext}`}>Deposit address (Polygon)</p>
@@ -2472,7 +2383,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                     try {
                       const addr = order.address || PAY_ADDRESS || NEXAPAY_DEPOSIT;
                       const amt = order.amount || lockedPrice;
-                      const res = await sendUsdtViaBrowserWallet(addr, amt);
+                      const res = await sendUsdtViaBrowserWallet(addr, amt, payNetwork);
                       if (res.ok) {
                         setError('');
                         return;
@@ -5902,95 +5813,7 @@ export default function NexaStore() {
     }
   };
 
-  useEffect(() => {
-    async function init() {
-      try {
-        const apps = await sbSelect('apps', 'status=eq.approved&select=*&order=created_at.desc&limit=50');
-        setAllApps(await enrichAppsWithDevelopers(apps || []));
-      } catch (e) {
-        console.error('Failed to load apps:', e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    init();
-
-    restoreSession().then(async (restored) => {
-      if (!restored) return;
-      setSession(restored.token);
-      try {
-        const profiles = await sbSelect('profiles', `id=eq.${restored.user.id}`, restored.token);
-        let prof = mergeDevProfile(profiles?.[0] || { id: restored.user.id, email: restored.user.email, is_owner: false });
-        prof = await linkVisitorIdToProfile(prof, restored.token);
-        setProfile(prof);
-      } catch (e) {
-        let prof = mergeDevProfile({ id: restored.user.id, email: restored.user.email, is_owner: false });
-        prof = await linkVisitorIdToProfile(prof, restored.token);
-        setProfile(prof);
-      }
-    });
-  }, []);
-
-  const filteredApps = useMemo(() => {
-    return allApps.filter(app => app.name.toLowerCase().includes(search.toLowerCase()));
-  }, [allApps, search]);
-
-  const categories = useMemo(() => {
-    return pastelCategories.map(cat => ({
-      ...cat,
-      count: allApps.filter(a => a.category === cat.name).length,
-    }));
-  }, [allApps]);
-
-  const showToast = (message, type = 'info', duration = 4500) => {
-    const id = Date.now() + Math.random();
-    setToasts(t => [...t, { id, message, type }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), duration);
-  };
-  const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
-
-  // Handle redirect back from NexaPulse SSO (?code=...) → full NexaStore session via bridge
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (!code) return;
-    window.history.replaceState({}, '', window.location.pathname);
-    let cancelled = false;
-    (async () => {
-      try {
-        showToast('Finishing NexaPulse sign-in…', 'info');
-        const session = await completeNexaPulseLogin(code);
-        if (cancelled) return;
-        if (!session?.access_token) {
-          showToast('NexaPulse sign-in did not return a session.', 'error');
-          return;
-        }
-        // Same path as password login
-        saveAuthSession(session);
-        setSession(session.access_token);
-        setShowAuthModal(false);
-        try {
-          const user = session.user || await sbGetProfile(session.access_token);
-          if (user) {
-            const profiles = await sbSelect('profiles', `id=eq.${user.id}`, session.access_token).catch(() => []);
-            let prof = mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email || session.email, is_owner: false });
-            if (typeof linkVisitorIdToProfile === 'function') {
-              prof = await linkVisitorIdToProfile(prof, session.access_token);
-            }
-            setProfile(prof);
-            showToast(`Signed in via NexaPulse as ${prof.email || session.email || user.email}`, 'success');
-          } else {
-            showToast('Signed in via NexaPulse, but profile could not be loaded.', 'info');
-          }
-        } catch (e) {
-          showToast(e.message || 'Signed in, but profile load failed.', 'info');
-        }
-      } catch (e) {
-        if (!cancelled) showToast(e.message || 'NexaPulse sign-in failed', 'error');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  
 
   const isOwned = (app) => {
     const price = parseFloat(app?.price) || 0;

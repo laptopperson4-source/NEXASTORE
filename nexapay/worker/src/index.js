@@ -1,20 +1,84 @@
 /**
- * NexaPay — Polygon USDT payment gateway (Cloudflare Worker)
+ * NexaPay — multi-network USDT payment gateway (Cloudflare Worker)
  * Non-custodial: buyers send USDT; worker verifies on-chain then marks order paid.
  *
+ * Supported EVM networks: Polygon, Ethereum, Arbitrum, Base, BSC
+ *
  * P0 security:
- * - CORS allowlist (app.nexapulse.pro)
+ * - CORS allowlist
  * - EVM address validation + locked pay_to on each order
- * - Official Polygon USDT contract only
- * - Amount match (strict 6-decimal window)
+ * - Official USDT contract per chain only
+ * - Amount match (strict window, correct decimals)
  * - Multi-block confirmations before completed
  * - Unique txHash (no double-credit)
  */
 
-const POLYGON_USDT = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
 const MIN_CONFIRMATIONS = 20;
-/** Amount tolerance as fraction (0.005 = 0.5%) */
 const AMOUNT_TOLERANCE = 0.005;
+
+/** Official USDT (or BSC-USD) contracts — do not accept lookalikes */
+const NETWORKS = {
+  polygon: {
+    id: "polygon",
+    name: "Polygon",
+    chainId: 137,
+    chainIdHex: "0x89",
+    usdt: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+    decimals: 6,
+    nativeSymbol: "POL",
+    explorer: "https://polygonscan.com",
+  },
+  ethereum: {
+    id: "ethereum",
+    name: "Ethereum",
+    chainId: 1,
+    chainIdHex: "0x1",
+    usdt: "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    decimals: 6,
+    nativeSymbol: "ETH",
+    explorer: "https://etherscan.io",
+  },
+  arbitrum: {
+    id: "arbitrum",
+    name: "Arbitrum One",
+    chainId: 42161,
+    chainIdHex: "0xa4b1",
+    usdt: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+    decimals: 6,
+    nativeSymbol: "ETH",
+    explorer: "https://arbiscan.io",
+  },
+  base: {
+    id: "base",
+    name: "Base",
+    chainId: 8453,
+    chainIdHex: "0x2105",
+    usdt: "0xfde4c96c8593536e31f126d2f3f4e1f5cbb7bd8c",
+    decimals: 6,
+    nativeSymbol: "ETH",
+    explorer: "https://basescan.org",
+  },
+  bsc: {
+    id: "bsc",
+    name: "BNB Smart Chain",
+    chainId: 56,
+    chainIdHex: "0x38",
+    usdt: "0x55d398326f99059ff775485246999027b3197955",
+    decimals: 18,
+    nativeSymbol: "BNB",
+    explorer: "https://bscscan.com",
+  },
+};
+
+function resolveNetwork(input) {
+  if (!input) return NETWORKS.polygon;
+  const s = String(input).trim().toLowerCase();
+  if (NETWORKS[s]) return NETWORKS[s];
+  const byChain = Object.values(NETWORKS).find(
+    (n) => String(n.chainId) === s || n.chainIdHex.toLowerCase() === s
+  );
+  return byChain || NETWORKS.polygon;
+}
 
 function cleanEnv(v) {
   if (v == null) return "";
@@ -67,7 +131,7 @@ function corsHeaders(request, env) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Vary": "Origin",
+    Vary: "Origin",
   };
 }
 
@@ -115,11 +179,13 @@ async function sb(env, path, { method = "GET", body, prefer } = {}) {
 }
 
 async function getOrder(env, orderId) {
-  const rows = await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}&select=*&limit=1`);
+  const rows = await sb(
+    env,
+    `orders?id=eq.${encodeURIComponent(orderId)}&select=*&limit=1`
+  );
   return Array.isArray(rows) ? rows[0] : null;
 }
 
-/** Returns true if another order already claimed this tx hash */
 async function txHashAlreadyUsed(env, txHash, exceptOrderId) {
   if (!txHash) return false;
   const q =
@@ -130,342 +196,328 @@ async function txHashAlreadyUsed(env, txHash, exceptOrderId) {
   return rows.some((r) => r.id !== exceptOrderId);
 }
 
-async function fetchTokenTxs(wallet, apiKey) {
-  // Etherscan API V2 (Polygon chainid=137). Same key works for Polygon + other EVM chains.
-  // Fallback: legacy api.polygonscan.com if V2 fails.
+async function fetchTokenTxs(wallet, apiKey, network) {
+  const contract = network.usdt;
+  const chainId = network.chainId;
   const v2Url =
-    `https://api.etherscan.io/v2/api?chainid=137` +
+    `https://api.etherscan.io/v2/api?chainid=${chainId}` +
     `&module=account&action=tokentx` +
-    `&contractaddress=${POLYGON_USDT}&address=${wallet}` +
-    `&page=1&offset=50&sort=desc&apikey=${apiKey}`;
-  const legacyUrl =
-    `https://api.polygonscan.com/api?module=account&action=tokentx` +
-    `&contractaddress=${POLYGON_USDT}&address=${wallet}` +
-    `&page=1&offset=50&sort=desc&apikey=${apiKey}`;
+    `&contractaddress=${contract}&address=${wallet}` +
+    `&page=1&offset=80&sort=desc&apikey=${apiKey}`;
 
-  for (const apiUrl of [v2Url, legacyUrl]) {
-    try {
-      const chainRes = await fetch(apiUrl);
-      const chainData = await chainRes.json();
-      if (Array.isArray(chainData.result)) {
-        return { txs: chainData.result };
-      }
-      if (chainData.status === "1" && Array.isArray(chainData.result)) {
-        return { txs: chainData.result };
-      }
-      // "No transactions found" is a valid empty result
-      if (
-        typeof chainData.result === "string" &&
-        /no transaction/i.test(chainData.result)
-      ) {
-        return { txs: [] };
-      }
-      // try next endpoint
-      if (apiUrl === legacyUrl) {
-        return {
-          txs: [],
-          error: chainData.message || chainData.result || "Explorer API error",
-        };
-      }
-    } catch (e) {
-      if (apiUrl === legacyUrl) {
-        return { txs: [], error: e.message || "Explorer fetch failed" };
-      }
+  try {
+    const chainRes = await fetch(v2Url);
+    const chainData = await chainRes.json();
+    if (Array.isArray(chainData.result)) {
+      return { txs: chainData.result };
     }
+    if (chainData.status === "1" && Array.isArray(chainData.result)) {
+      return { txs: chainData.result };
+    }
+    if (
+      typeof chainData.result === "string" &&
+      /no transaction/i.test(chainData.result)
+    ) {
+      return { txs: [] };
+    }
+    return {
+      txs: [],
+      error: chainData.message || chainData.result || "Explorer API error",
+    };
+  } catch (e) {
+    return { txs: [], error: e.message || "Explorer fetch failed" };
   }
-  return { txs: [] };
 }
 
-function amountInRange(rawValue, expectedUsdt) {
+function amountMatches(rawValue, expectedUsdt, decimals) {
   const expected = Number(expectedUsdt);
   if (!Number.isFinite(expected) || expected <= 0) return false;
-  const minRaw = Math.floor(expected * (1 - AMOUNT_TOLERANCE) * 1e6);
-  const maxRaw = Math.ceil(expected * (1 + AMOUNT_TOLERANCE) * 1e6);
-  const val = parseInt(String(rawValue), 10);
-  if (!Number.isFinite(val)) return false;
-  return val >= minRaw && val <= maxRaw;
+  const raw = BigInt(String(rawValue || "0"));
+  const scale = 10n ** BigInt(decimals);
+  // Compare as numbers with tolerance
+  const actual = Number(raw) / Number(scale);
+  if (!Number.isFinite(actual)) return false;
+  const lo = expected * (1 - AMOUNT_TOLERANCE);
+  const hi = expected * (1 + AMOUNT_TOLERANCE);
+  return actual >= lo && actual <= hi;
 }
 
 export default {
   async fetch(request, env) {
     const cors = corsHeaders(request, env);
-
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: cors });
+      return new Response(null, { status: 204, headers: cors });
     }
 
     const url = new URL(request.url);
 
-    // ─── CREATE ORDER ───────────────────────────────────────────
+    if (url.pathname === "/api/networks" && request.method === "GET") {
+      return json(
+        {
+          networks: Object.values(NETWORKS).map((n) => ({
+            id: n.id,
+            name: n.name,
+            chainId: n.chainId,
+            chainIdHex: n.chainIdHex,
+            usdt: n.usdt,
+            decimals: n.decimals,
+            nativeSymbol: n.nativeSymbol,
+            explorer: n.explorer,
+          })),
+          default: "polygon",
+        },
+        200,
+        cors
+      );
+    }
+
     if (url.pathname === "/api/create-order" && request.method === "POST") {
       try {
         const body = await request.json();
-        const email = body.email;
         const amount = Number(body.amount);
         const payTo = (body.pay_to || body.address || body.wallet || env.DEFAULT_PAY_TO || "").trim();
-        const appId = body.app_id || null;
+        const network = resolveNetwork(body.network || body.chain || body.chain_id || "polygon");
+        const appId = body.app_id || body.appId || null;
+        const email = body.email || body.receipt_email || null;
 
-        if (!email || !Number.isFinite(amount) || amount <= 0) {
-          return json({ error: "Valid email and amount are required" }, 400, cors);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return json({ error: "Valid amount is required" }, 400, cors);
         }
         if (!isValidEvmAddress(payTo)) {
           return json(
-            { error: "Valid pay_to (Polygon) address is required" },
+            { error: "Valid pay_to (EVM) address is required" },
             400,
             cors
           );
         }
 
         const row = {
-          user_email: email,
-          amount_fiat: amount,
-          currency_fiat: "USD",
-          amount_crypto_expected: amount,
-          crypto_asset: "USDT",
-          blockchain_network: "polygon",
+          amount,
           status: "pending",
           pay_to: normalizeAddr(payTo),
+          network: network.id,
+          chain_id: network.chainId,
+          usdt_contract: network.usdt,
+          confirmations: 0,
         };
         if (appId) row.app_id = appId;
+        if (email) row.email = email;
 
-        let created;
+        let order;
         try {
-          created = await sb(env, "orders", {
+          const inserted = await sb(env, "orders", {
             method: "POST",
             body: row,
             prefer: "return=representation",
           });
+          order = Array.isArray(inserted) ? inserted[0] : inserted;
         } catch (e) {
-          // Schema without pay_to / app_id — retry minimal columns
+          // Schema without network columns — retry minimal
           const minimal = {
-            user_email: email,
-            amount_fiat: amount,
-            currency_fiat: "USD",
+            amount,
             status: "pending",
+            pay_to: normalizeAddr(payTo),
           };
-          created = await sb(env, "orders", {
-            method: "POST",
-            body: minimal,
-            prefer: "return=representation",
-          });
-          // Best-effort patch pay_to if column exists
-          const order = Array.isArray(created) ? created[0] : created;
-          if (order?.id) {
-            try {
-              await sb(env, `orders?id=eq.${order.id}`, {
-                method: "PATCH",
-                body: { pay_to: normalizeAddr(payTo) },
-              });
-              order.pay_to = normalizeAddr(payTo);
-            } catch (_) {}
+          if (appId) minimal.app_id = appId;
+          try {
+            const inserted = await sb(env, "orders", {
+              method: "POST",
+              body: minimal,
+              prefer: "return=representation",
+            });
+            order = Array.isArray(inserted) ? inserted[0] : inserted;
+            order.pay_to = order.pay_to || normalizeAddr(payTo);
+          } catch (e2) {
+            throw e2;
           }
         }
 
-        const order = Array.isArray(created) ? created[0] : created;
-        if (!order?.id) throw new Error("Order created but no id returned");
-
-        // Ensure client always knows locked receiver
         order.pay_to = order.pay_to || normalizeAddr(payTo);
         order.address = order.pay_to;
+        order.network = network.id;
+        order.chain_id = network.chainId;
+        order.usdt_contract = network.usdt;
+        order.decimals = network.decimals;
+        order.network_name = network.name;
+        order.native_symbol = network.nativeSymbol;
+        order.explorer = network.explorer;
+        order.chain_id_hex = network.chainIdHex;
 
-        return json({ success: true, order }, 200, cors);
+        return json({ order }, 200, cors);
       } catch (err) {
         return json({ error: err.message || "create-order failed" }, 500, cors);
       }
     }
 
-    // ─── ORDER STATUS ───────────────────────────────────────────
-    if (url.pathname === "/api/order-status" && request.method === "GET") {
+    if (
+      (url.pathname === "/api/order-status" || url.pathname === "/api/check-payment") &&
+      request.method === "GET"
+    ) {
       try {
-        const orderId = url.searchParams.get("id");
-        if (!orderId) return json({ error: "id required" }, 400, cors);
-        const order = await getOrder(env, orderId);
-        if (!order) return json({ error: "Order not found" }, 404, cors);
-        return json({ order, status: order.status }, 200, cors);
-      } catch (err) {
-        return json({ error: err.message }, 500, cors);
-      }
-    }
-
-    // ─── CHECK PAYMENT (P0) ─────────────────────────────────────
-    if (url.pathname === "/api/check-payment" && request.method === "GET") {
-      try {
-        const orderId = url.searchParams.get("id");
-        const amountHint = url.searchParams.get("amount");
-        if (!orderId) return json({ error: "id required" }, 400, cors);
-
-        const order = await getOrder(env, orderId);
+        const id = url.searchParams.get("id");
+        if (!id) return json({ error: "id required" }, 400, cors);
+        let order = await getOrder(env, id);
         if (!order) return json({ error: "Order not found" }, 404, cors);
 
-        if (order.status === "completed" || order.status === "paid" || order.status === "success") {
-          return json(
-            {
-              paid: true,
-              status: "completed",
-              tx: order.onramp_transaction_id || null,
-              confirmations: order.confirmations ?? null,
-            },
-            200,
-            cors
-          );
-        }
-
-        const wallet = normalizeAddr(
+        const network = resolveNetwork(
+          order.network || order.chain_id || url.searchParams.get("network") || "polygon"
+        );
+        const payTo = normalizeAddr(
           order.pay_to || order.deposit_address || env.DEFAULT_PAY_TO || ""
         );
-        if (!isValidEvmAddress(wallet)) {
+        if (!isValidEvmAddress(payTo)) {
+          return json(
+            { error: "Order has no valid pay_to address", order },
+            400,
+            cors
+          );
+        }
+
+        if (order.status === "completed" || order.status === "paid") {
           return json(
             {
-              paid: false,
-              status: order.status,
-              error: "Order has no valid pay_to address",
+              order: {
+                ...order,
+                network: network.id,
+                network_name: network.name,
+              },
+              paid: true,
             },
             200,
             cors
           );
         }
 
-        const apiKey = env.POLYGONSCAN_API_KEY || "";
+        const apiKey = cleanEnv(env.POLYGONSCAN_API_KEY || env.ETHERSCAN_API_KEY);
         if (!apiKey) {
           return json(
             {
+              order,
               paid: false,
-              status: order.status,
-              checked: true,
-              warning: "POLYGONSCAN_API_KEY not set — cannot verify on-chain",
+              error: "Explorer API key not configured on worker",
             },
             200,
             cors
           );
         }
 
-        const expected = Number(amountHint || order.amount_crypto_expected || order.amount_fiat);
-        const since =
-          Math.floor(new Date(order.created_at).getTime() / 1000) - 120;
-
-        const { txs, error: scanErr } = await fetchTokenTxs(wallet, apiKey);
-        if (scanErr && !txs.length) {
-          return json(
-            { paid: false, status: order.status, checked: true, warning: scanErr },
-            200,
-            cors
-          );
+        const { txs, error: txErr } = await fetchTokenTxs(payTo, apiKey, network);
+        if (txErr && (!txs || !txs.length)) {
+          return json({ order, paid: false, explorer_error: txErr }, 200, cors);
         }
 
-        // Prefer official USDT contract + exact receiver + amount + time
-        const candidates = txs.filter((tx) => {
-          const contract = normalizeAddr(tx.contractAddress);
-          if (contract !== POLYGON_USDT) return false;
-          if (normalizeAddr(tx.to) !== wallet) return false;
-          if (!amountInRange(tx.value, expected)) return false;
-          const ts = parseInt(tx.timeStamp, 10);
-          if (!Number.isFinite(ts) || ts < since) return false;
-          return true;
+        const expected = Number(order.amount);
+        const usdtLower = network.usdt.toLowerCase();
+        const candidates = (txs || []).filter((tx) => {
+          if (normalizeAddr(tx.to) !== payTo) return false;
+          if (normalizeAddr(tx.contractAddress || tx.contractaddress) !== usdtLower)
+            return false;
+          const dec = Number(tx.tokenDecimal || network.decimals);
+          return amountMatches(tx.value, expected, dec);
         });
 
         if (!candidates.length) {
-          return json({ paid: false, status: order.status, checked: true }, 200, cors);
-        }
-
-        // Newest first already from sort=desc
-        for (const match of candidates) {
-          const conf = parseInt(match.confirmations, 10);
-          const confirmations = Number.isFinite(conf) ? conf : 0;
-          const txHash = match.hash;
-
-          if (confirmations < MIN_CONFIRMATIONS) {
-            // Surface progress but do not complete
-            return json(
-              {
-                paid: false,
-                status: "confirming",
-                tx: txHash,
-                confirmations,
-                required: MIN_CONFIRMATIONS,
-                checked: true,
-              },
-              200,
-              cors
-            );
-          }
-
-          // Idempotency: reject if this hash already completed another order
-          if (await txHashAlreadyUsed(env, txHash, orderId)) {
-            continue; // try next candidate
-          }
-
-          try {
-            await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}`, {
-              method: "PATCH",
-              body: {
-                status: "completed",
-                onramp_transaction_id: txHash,
-                confirmations,
-                updated_at: new Date().toISOString(),
-              },
-            });
-          } catch (e) {
-            // Unique violation on tx hash → treat as not ours
-            if (/duplicate|unique|23505/i.test(String(e.message))) {
-              continue;
-            }
-            // Column confirmations may not exist
-            try {
-              await sb(env, `orders?id=eq.${encodeURIComponent(orderId)}`, {
-                method: "PATCH",
-                body: {
-                  status: "completed",
-                  onramp_transaction_id: txHash,
-                  updated_at: new Date().toISOString(),
-                },
-              });
-            } catch (e2) {
-              throw e2;
-            }
-          }
-
           return json(
             {
-              paid: true,
-              status: "completed",
-              tx: txHash,
-              confirmations,
-              required: MIN_CONFIRMATIONS,
+              order: {
+                ...order,
+                network: network.id,
+                network_name: network.name,
+              },
+              paid: false,
+              pending: true,
             },
             200,
             cors
           );
         }
 
+        // Prefer highest confirmation count
+        candidates.sort(
+          (a, b) => Number(b.confirmations || 0) - Number(a.confirmations || 0)
+        );
+        const best = candidates[0];
+        const conf = Number(best.confirmations || 0);
+        const txHash = best.hash || best.transactionHash;
+
+        if (await txHashAlreadyUsed(env, txHash, order.id)) {
+          return json(
+            {
+              order,
+              paid: false,
+              error: "This transaction was already used for another order",
+            },
+            200,
+            cors
+          );
+        }
+
+        // Update confirmations
+        try {
+          await sb(env, `orders?id=eq.${encodeURIComponent(order.id)}`, {
+            method: "PATCH",
+            body: {
+              confirmations: conf,
+              onramp_transaction_id: txHash || undefined,
+            },
+          });
+        } catch {}
+
+        if (conf < MIN_CONFIRMATIONS) {
+          order.confirmations = conf;
+          order.onramp_transaction_id = txHash;
+          return json(
+            {
+              order: {
+                ...order,
+                network: network.id,
+                network_name: network.name,
+              },
+              paid: false,
+              pending: true,
+              confirmations: conf,
+              required: MIN_CONFIRMATIONS,
+              txHash,
+            },
+            200,
+            cors
+          );
+        }
+
+        // Mark completed
+        try {
+          await sb(env, `orders?id=eq.${encodeURIComponent(order.id)}`, {
+            method: "PATCH",
+            body: {
+              status: "completed",
+              confirmations: conf,
+              onramp_transaction_id: txHash,
+            },
+          });
+        } catch (e) {
+          return json({ error: e.message, order }, 500, cors);
+        }
+
+        order = await getOrder(env, id);
         return json(
           {
-            paid: false,
-            status: order.status,
-            checked: true,
-            warning: "Matching transfer found but tx already used or not yet usable",
+            order: {
+              ...order,
+              network: network.id,
+              network_name: network.name,
+            },
+            paid: true,
+            txHash,
+            confirmations: conf,
           },
           200,
           cors
         );
       } catch (err) {
-        return json({ error: err.message }, 500, cors);
+        return json({ error: err.message || "order-status failed" }, 500, cors);
       }
     }
 
-    // ─── WEBHOOK: disabled unsigned generic completion (P0) ─────
-    if (url.pathname === "/api/webhook" && request.method === "POST") {
-      const secret = env.WEBHOOK_SECRET || "";
-      const sig = request.headers.get("X-Nexapay-Signature") || "";
-      if (!secret || sig !== secret) {
-        return json({ error: "Unauthorized webhook" }, 401, cors);
-      }
-      return json(
-        { ok: false, message: "Signed webhooks accepted but auto-complete disabled; use check-payment" },
-        200,
-        cors
-      );
-    }
-
-    return new Response("Not Found", { status: 404, headers: cors });
+    return json({ error: "Not found", path: url.pathname }, 404, cors);
   },
 };
