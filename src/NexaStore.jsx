@@ -1271,29 +1271,60 @@ function AuthModal({ onClose, onAuth }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className="bg-white rounded-3xl p-6 w-full max-w-sm">
+    <div
+      className="fixed inset-0 bg-black/60 z-[250] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ fontFamily: "'Inter', sans-serif" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm max-h-[92vh] overflow-y-auto shadow-2xl"
+        style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-extrabold text-gray-900">{mode === 'forgot' ? 'Reset password' : (isSignUp ? 'Create account' : 'Sign in')}</h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
+          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-4">
+        <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-4" autoComplete="on">
           <div>
-            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5">Email</label>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5" htmlFor="nexastore-auth-email">Email</label>
+            <input
+              id="nexastore-auth-email"
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete={isSignUp ? 'email' : 'username'}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-[16px] sm:text-[14px] text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
           </div>
 
           {mode !== 'forgot' && (
           <div>
-            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5">Password</label>
+            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5" htmlFor="nexastore-auth-password">Password</label>
             <div className="relative">
-              <input type={showPassword ? "text" : "password"} required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500" />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+              <input
+                id="nexastore-auth-password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl text-[16px] sm:text-[14px] text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 p-1">
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
@@ -2189,25 +2220,37 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
   const startPayment = async () => {
     setError('');
     if (!networkConfirmed) {
-      setError(`Confirm you will pay on ${payNetwork.name} before continuing.`);
+      setError(`Confirm the network is correct (${payNetwork.name}) before continuing. If it is wrong, choose the correct network chip first.`);
       return;
     }
     setBusy(true);
     try {
-      // Re-check wallet chain matches the confirmed network
+      // Hard block if wallet network does not match confirmed selection
       const det = await detectWalletNetwork();
       if (det.ok && det.network && det.network.id !== payNetworkId) {
         setBusy(false);
-        setError(`Wallet is on ${det.network.name}, but you confirmed ${payNetwork.name}. Switch network in your wallet or pick the matching chip, then confirm again.`);
         setNetworkConfirmed(false);
-        setPayNetworkId(det.network.id);
+        setError(
+          `Payment blocked: wallet is on ${det.network.name}, you confirmed ${payNetwork.name}. Choose your correct network below, confirm again, then pay.`
+        );
         setDetectedLabel(`${det.network.name} (chain ${det.chainId})`);
+        setWalletDetect({ status: 'done', supported: true, chainId: det.chainId, networkId: det.network.id });
         return;
       }
       if (det.ok && !det.network && det.chainId != null) {
         setBusy(false);
-        setError(`Wallet chain ${det.chainId} is not supported. Switch to ${payNetwork.name} in your wallet, then confirm.`);
         setNetworkConfirmed(false);
+        setError(
+          `Payment blocked: wallet chain ${det.chainId} is not supported. Switch wallet to a supported network, pick that chip, confirm, then pay.`
+        );
+        setDetectedLabel(`Unsupported chain ${det.chainId}`);
+        setWalletDetect({ status: 'done', supported: false, chainId: det.chainId });
+        return;
+      }
+      if (!det.ok && det.reason === 'no_provider') {
+        setBusy(false);
+        setNetworkConfirmed(false);
+        setError('Payment blocked: no browser wallet detected. Install MetaMask (or similar), switch to the confirmed network, then try again.');
         return;
       }
       const receiptEmail = (profile && profile.email) || `buyer-${Date.now()}@nexastore.app`;
@@ -2413,7 +2456,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                       <button
                         key={n.id}
                         type="button"
-                        onClick={() => { setPayNetworkId(n.id); setNetworkConfirmed(false); }}
+                        onClick={() => { setPayNetworkId(n.id); setNetworkConfirmed(false); setError(''); }}
                         className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
                           payNetworkId === n.id
                             ? 'bg-violet-600 text-white border-violet-500'
@@ -2432,22 +2475,54 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                     <input
                       type="checkbox"
                       checked={networkConfirmed}
-                      onChange={(e) => setNetworkConfirmed(e.target.checked)}
+                      onChange={async (e) => {
+                        const want = e.target.checked;
+                        if (!want) {
+                          setNetworkConfirmed(false);
+                          setError('');
+                          return;
+                        }
+                        setError('');
+                        const det = await detectWalletNetwork();
+                        if (det.ok && det.network && det.network.id !== payNetworkId) {
+                          setNetworkConfirmed(false);
+                          setError(
+                            `Wallet is on ${det.network.name}, but you selected ${payNetwork.name}. Choose the correct network chip below (or switch your wallet), then confirm again.`
+                          );
+                          setDetectedLabel(`${det.network.name} (chain ${det.chainId})`);
+                          setWalletDetect({ status: 'done', supported: true, chainId: det.chainId, networkId: det.network.id });
+                          return;
+                        }
+                        if (det.ok && !det.network && det.chainId != null) {
+                          setNetworkConfirmed(false);
+                          setError(
+                            `Wallet chain ${det.chainId} is not supported. Switch your wallet to Polygon, Ethereum, Arbitrum, Base, or BNB Chain, pick that chip, then confirm.`
+                          );
+                          setDetectedLabel(`Unsupported chain ${det.chainId}`);
+                          setWalletDetect({ status: 'done', supported: false, chainId: det.chainId });
+                          return;
+                        }
+                        setNetworkConfirmed(true);
+                        setError('');
+                      }}
                       className="mt-0.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                     />
                     <span className={`text-[12px] leading-snug ${text}`}>
-                      <b>I confirm</b> I will send <b>{lockedPrice} USDT</b> on <b>{payNetwork.name}</b> only.
-                      Wrong network can mean lost funds.
+                      <b>I confirm</b> this network is correct: <b>{payNetwork.name}</b>.
+                      I will send <b>{lockedPrice} USDT</b> on that network only. If it is wrong, uncheck and choose the correct network.
                     </span>
                   </label>
+                  {error && stage === 'form' && (
+                    <p className="text-[12px] text-red-500 font-medium leading-snug">{error}</p>
+                  )}
                 </div>
 
                 <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
                   <p className={`text-[12px] font-bold ${text}`}>1. Open wallet · {payNetwork.name} · buy USDT</p>
                   <ol className={`text-[11.5px] space-y-1 list-decimal list-inside leading-relaxed ${subtext}`}>
                     <li>Open <b className={text}>{wallet?.name || 'your wallet'}</b></li>
-                    <li>Set network to <b className={text}>Polygon Mainnet</b></li>
-                    <li>Buy at least <b className={text}>{lockedPrice} USDT</b> on Polygon</li>
+                    <li>Set network to <b className={text}>{payNetwork.name}</b></li>
+                    <li>Buy at least <b className={text}>{lockedPrice} USDT</b> on {payNetwork.name}</li>
                     <li>Come back here when balances are ready</li>
                   </ol>
                   {warnings?.length > 0 && (
