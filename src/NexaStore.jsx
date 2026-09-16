@@ -6026,6 +6026,68 @@ export default function NexaStore() {
   const [showTutorialHub, setShowTutorialHub] = useState(false);
   const [activeTutorial, setActiveTutorial] = useState(null);
 
+  const showToast = (message, type = 'info', duration = 4200) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, message, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), duration);
+  };
+  const dismissToast = (id) => setToasts((t) => t.filter((x) => x.id !== id));
+
+  const filteredApps = useMemo(() => {
+    const q = (search || '').trim().toLowerCase();
+    let list = allApps || [];
+    if (q) {
+      list = list.filter((a) =>
+        [a.name, a.tagline, a.description, a.developer_name, a.company_name, a.category]
+          .filter(Boolean)
+          .some((s) => String(s).toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [allApps, search]);
+
+  const categories = useMemo(() => {
+    const set = new Set();
+    for (const a of allApps || []) {
+      if (a.category) set.add(a.category);
+    }
+    return Array.from(set).sort();
+  }, [allApps]);
+
+  // Restore session + load approved apps
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sess = await restoreSession();
+        if (cancelled) return;
+        if (sess?.access_token) {
+          setSession(sess.access_token);
+          try {
+            const user = await sbGetProfile(sess.access_token);
+            if (user) {
+              const profiles = await sbSelect('profiles', `id=eq.${user.id}`, sess.access_token).catch(() => []);
+              let prof = mergeDevProfile(profiles?.[0] || { id: user.id, email: user.email, is_owner: false });
+              if (typeof linkVisitorIdToProfile === 'function') {
+                prof = await linkVisitorIdToProfile(prof, sess.access_token);
+              }
+              if (!cancelled) setProfile(prof);
+            }
+          } catch {}
+        }
+      } catch {}
+      try {
+        const apps = await sbSelect('apps', 'status=eq.approved&select=*&order=created_at.desc&limit=50');
+        if (!cancelled) setAllApps(await enrichAppsWithDevelopers(apps || []));
+      } catch (e) {
+        console.error('Failed to load apps', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const openTutorialHub = () => setShowTutorialHub(true);
   const openTutorialById = async (tutorialId, walletName) => {
     const list = await loadTutorials();
