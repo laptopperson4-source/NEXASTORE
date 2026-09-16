@@ -6047,11 +6047,30 @@ export default function NexaStore() {
   }, [allApps, search]);
 
   const categories = useMemo(() => {
-    const set = new Set();
+    const counts = {};
     for (const a of allApps || []) {
-      if (a.category) set.add(a.category);
+      const name = a.category || 'Tools';
+      counts[name] = (counts[name] || 0) + 1;
     }
-    return Array.from(set).sort();
+    // Prefer known pastel styles; fall back for unknown categories
+    const known = pastelCategories.map((c) => ({
+      ...c,
+      count: counts[c.name] || 0,
+    }));
+    const knownNames = new Set(pastelCategories.map((c) => c.name));
+    const extras = Object.keys(counts)
+      .filter((n) => !knownNames.has(n))
+      .sort()
+      .map((name) => ({
+        name,
+        icon: categoryIconMap[name] || Package,
+        bg: 'bg-gray-100',
+        color: 'text-gray-600',
+        count: counts[name],
+      }));
+    // Show categories that exist in catalog first, then empty known ones at the end
+    const withApps = [...known, ...extras].filter((c) => c.count > 0);
+    return withApps.length ? withApps : known;
   }, [allApps]);
 
   // Restore session + load approved apps
