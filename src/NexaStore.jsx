@@ -850,16 +850,36 @@ async function ensureAffiliateForUser(profile, session) {
   return null;
 }
 
-/** Explicit signup for the affiliate program (pending until owner accepts). */
+/** Affiliate signup — auto-approved (immediate active status). */
 async function applyAffiliateForUser(profile, session) {
   if (!profile?.id) throw new Error('Sign in first');
   const existing = await ensureAffiliateForUser(profile, session);
-  if (existing) return existing;
+  if (existing) {
+    // Upgrade legacy pending rows to active (auto-approve)
+    if (existing.status === 'pending') {
+      existing.status = 'active';
+      const list = loadLocalAffiliates().map((a) =>
+        a.userId === profile.id ? { ...a, status: 'active' } : a
+      );
+      saveLocalAffiliates(list);
+      try {
+        if (session) {
+          await sbUpdate(
+            'affiliates',
+            { status: 'active' },
+            { user_id: profile.id },
+            session
+          );
+        }
+      } catch {}
+    }
+    return { ...existing, status: existing.status === 'pending' ? 'active' : existing.status };
+  }
   const mine = {
     userId: profile.id,
     email: profile.email || '',
     wallet: profile.payout_wallet || '',
-    status: 'pending',
+    status: 'active',
     createdAt: new Date().toISOString(),
   };
   const local = loadLocalAffiliates();
@@ -874,7 +894,7 @@ async function applyAffiliateForUser(profile, session) {
           email: profile.email || null,
           code: null,
           payout_wallet: mine.wallet || null,
-          status: 'pending',
+          status: 'active',
         },
         session
       );
@@ -2767,7 +2787,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
     try {
       const a = await applyAffiliateForUser(profile, session);
       setAff(a);
-      showToast?.('Application submitted — waiting for approval', 'success');
+      showToast?.("You're in — affiliate account is active. Generate a code and share your link.", "success");
     } catch (e) {
       showToast?.(e.message || 'Could not apply', 'error');
     } finally {
@@ -2781,7 +2801,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
       if (!selectedApp) throw new Error('Select a paid app first.');
       const next = await generateAffiliateCodeForUser(profile, session, selectedApp);
       refreshCodes();
-      showToast?.(`Code ${next.code} for ${selectedApp.name} — valid 30 days`, 'success');
+      showToast?.(`Code ${next.code} for ${selectedApp.name} is live — share your link`, 'success');
     } catch (e) {
       showToast?.(e.message || 'Could not generate code', 'error');
     } finally {
@@ -2866,31 +2886,31 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
               </ul>
             </div>
             <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
-              <p className={`font-bold text-[14px] ${text}`}>How signup works</p>
+              <p className={`font-bold text-[14px] ${text}`}>How it works</p>
               <ol className={`list-decimal pl-5 space-y-1.5 text-[13px] ${subtext}`}>
-                <li>Submit an application with this account</li>
-                <li>Owner reviews you in Affiliate Admin</li>
-                <li>If accepted, your promoter dashboard unlocks</li>
-                <li>Generate codes for paid apps and share links</li>
+                <li>Join with this account — approved instantly</li>
+                <li>Generate a promo code for a paid app</li>
+                <li>Share your link; earn 10% on confirmed sales</li>
               </ol>
-              <p className={`text-[12px] ${subtext}`}>Until you are accepted you will only see a waiting status — no codes and no earnings dashboard.</p>
+              <p className={`text-[12px] ${subtext}`}>No waiting for review. You can generate codes as soon as you join.</p>
               <button type="button" disabled={applyBusy} onClick={onApply}
                 className="w-full py-3.5 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-50">
-                {applyBusy ? 'Submitting…' : 'Sign up for the affiliate program'}
+                {applyBusy ? 'Joining…' : 'Join the affiliate program'}
               </button>
-              <p className={`text-[11px] text-center ${subtext}`}>By applying you agree to promote honestly — no bots or misleading claims.</p>
+              <p className={`text-[11px] text-center ${subtext}`}>By joining you agree to promote honestly — no bots or misleading claims.</p>
             </div>
           </div>
         ) : status === 'pending' ? (
           <div className={`rounded-2xl border p-5 space-y-3 ${card} ${border}`}>
-            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700">Pending approval</span>
-            <p className={`font-extrabold text-[16px] ${text}`}>Application received</p>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700">Almost ready</span>
+            <p className={`font-extrabold text-[16px] ${text}`}>Activate your affiliate account</p>
             <p className={`text-[13px] ${subtext}`}>
-              Your request is waiting for the store owner. You do <b>not</b> have an affiliate dashboard or promo codes until you are accepted.
+              New signups are approved automatically. Tap below to activate and unlock codes.
             </p>
             <p className={`text-[12px] ${subtext}`}>Email: {aff.email || profile.email}</p>
-            <button type="button" onClick={reload} className={`w-full py-2.5 rounded-xl text-[13px] font-semibold ${dark ? 'bg-white/10' : 'bg-gray-100'}`}>
-              Check status
+            <button type="button" disabled={applyBusy} onClick={onApply}
+              className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-50">
+              {applyBusy ? 'Activating…' : 'Activate now'}
             </button>
           </div>
         ) : status === 'rejected' || status === 'blocked' ? (
@@ -5888,29 +5908,20 @@ function AffiliatePortal({ session, profile, paidApps, showToast, onAuth, onSign
           <img src="/branding/nexapulse-seal.png" alt="" className="w-20 h-20 mx-auto rounded-full object-cover shadow-[0_0_40px_rgba(180,180,200,0.15)]" />
           <p className="mt-4 text-[11px] font-bold tracking-[0.28em] uppercase text-zinc-500">NexaStore · Affiliate Program</p>
           <h1 className="mt-2 text-[1.75rem] sm:text-[2.1rem] font-extrabold tracking-tight bg-gradient-to-b from-white via-zinc-300 to-zinc-500 bg-clip-text text-transparent">
-            Earn 10% on every sale you refer
+            Get 10% when someone buys through your link.
           </h1>
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {[
-              ['10%', 'per confirmed sale'],
-              ['USDT', 'payout'],
-              ['30d', 'code validity'],
-            ].map(([k, v]) => (
-              <div key={k} className="min-w-[96px] rounded-xl border border-white/10 bg-gradient-to-b from-zinc-800/90 to-black/90 px-4 py-3">
-                <p className="text-[1.1rem] font-extrabold bg-gradient-to-b from-white to-zinc-400 bg-clip-text text-transparent">{k}</p>
-                <p className="text-[11px] text-zinc-500">{v}</p>
-              </div>
-            ))}
-          </div>
+          <p className="mt-4 text-[14px] text-zinc-400 max-w-md mx-auto leading-relaxed">
+            Sign up on this page, generate a promo code for a paid app, and share your link. Payouts in USDT.
+          </p>
           <p className="mt-3 text-[12px] text-zinc-500">
-            Share: <code className="text-zinc-300">app.nexapulse.pro/affiliates/</code>
+            Affiliates are already earning with NexaStore · <code className="text-zinc-300">app.nexapulse.pro/affiliates/</code>
           </p>
         </div>
 
         {!session || !profile ? (
           <div className="rounded-2xl border border-white/10 bg-zinc-900/50 p-6 text-center space-y-3">
-            <p className="text-[15px] font-bold text-zinc-100">Sign in to apply or open your affiliate dashboard</p>
-            <p className="text-[13px] text-zinc-400">Signup, approval status, codes, and earnings all live on this page.</p>
+            <p className="text-[15px] font-bold text-zinc-100">Sign in to join and open your dashboard</p>
+            <p className="text-[13px] text-zinc-400">Signup, codes, and earnings stay on this page — you never leave /affiliates.</p>
             <button type="button" onClick={() => setShowAuth(true)}
               className="w-full max-w-sm mx-auto py-3 rounded-full font-bold text-[14px] text-black bg-gradient-to-b from-zinc-100 to-zinc-400">
               Sign in / Sign up
@@ -5962,16 +5973,16 @@ export default function NexaStore() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showAffiliateDash, setShowAffiliateDash] = useState(false);
   const [showAffiliateAdmin, setShowAffiliateAdmin] = useState(false);
-  // Shareable landing: /affiliates/ → /?open=affiliate opens promoter signup
+  // Legacy ?open=affiliate → stay on /affiliates (never dump into main store profile)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('open') === 'affiliate') {
-        setView('profile');
-        // Slight delay so profile mounts; open promoter panel (not owner admin)
-        const t = setTimeout(() => setShowAffiliateDash(true), 100);
-        window.history.replaceState({}, '', window.location.pathname);
-        return () => clearTimeout(t);
+        if (!/^\/affiliates\/?$/i.test(window.location.pathname)) {
+          window.location.replace('/affiliates/');
+          return;
+        }
+        window.history.replaceState({}, '', '/affiliates/');
       }
     } catch {}
   }, []);
@@ -6158,7 +6169,7 @@ export default function NexaStore() {
     },
     onOpenTutorials: openTutorialHub,
     onProfileUpdated: setProfile,
-    onOpenAffiliate: () => setShowAffiliateDash(true),
+    onOpenAffiliate: () => { window.location.href = '/affiliates/'; },
     onOpenAffiliateAdmin: () => setShowAffiliateAdmin(true),
     onOpenTutorial: openTutorialById,
   };
