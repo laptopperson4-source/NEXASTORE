@@ -118,11 +118,59 @@ async function sbUpdate(table, data, match, token) {
 }
 async function sbUpload(bucket, path, file, token) {
   const url = `${STORAGEAPI}/object/${bucket}/${path}`;
-  const opts = { method: "POST", body: file, headers: { "apikey": ANON_KEY, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" } };
-  if (token) opts.headers["authorization"] = `Bearer ${token}`;
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const headers = {
+    apikey: ANON_KEY,
+    Authorization: `Bearer ${token || ANON_KEY}`,
+    'Content-Type': file.type || 'application/octet-stream',
+    'x-upsert': 'true',
+  };
+  // Prefer POST with upsert; if object exists and policy blocks, try PUT
+  let r = await fetch(url, { method: 'POST', body: file, headers });
+  if (!r.ok && (r.status === 400 || r.status === 409)) {
+    r = await fetch(url, { method: 'PUT', body: file, headers });
+  }
+  if (!r.ok) {
+    const raw = await r.text();
+    let nice = raw;
+    try {
+      const j = JSON.parse(raw);
+      nice = j.message || j.error || raw;
+    } catch {}
+    if (/row-level security|AccessDenied|Unauthorized|403/i.test(String(nice) + String(r.status))) {
+      throw new Error(
+        'Upload blocked by storage permissions. Ask the store owner to run DEVELOPER_UPDATE_RLS.sql in Supabase (storage policies for screenshots/logos).'
+      );
+    }
+    throw new Error(typeof nice === 'string' ? nice.slice(0, 220) : 'Upload failed');
+  }
+  try { return await r.json(); } catch { return {}; }
+}
+
+/** Turn Supabase / network errors into short user-facing text */
+function humanizeAppError(err) {
+  const raw = err?.message || String(err || '');
+  if (/row-level security|AccessDenied|Unauthorized|403/i.test(raw)) {
+    return {
+      message: 'Save was blocked by database permissions (RLS). If you own this app, the store owner may need to run the developer update SQL in Supabase. You can send an error log so we can fix it.',
+      reportable: true,
+      stack: raw,
+      where: 'developer_save',
+    };
+  }
+  if (/Failed to fetch|NetworkError|network/i.test(raw)) {
+    return { message: 'Network problem — check your connection and try again.', reportable: false, stack: raw, where: 'network' };
+  }
+  // Strip raw JSON blobs
+  let msg = raw;
+  if (msg.trim().startsWith('{')) {
+    try {
+      const j = JSON.parse(msg);
+      msg = j.message || j.error_description || j.error || 'Something went wrong while saving.';
+    } catch {
+      msg = 'Something went wrong while saving.';
+    }
+  }
+  return { message: String(msg).slice(0, 240), reportable: true, stack: raw, where: 'app' };
 }
 
 async function sbSignUp(email, password) {
@@ -3775,7 +3823,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
         await sbDelete('app_screenshots', { app_id: appId }, session).catch(() => {});
         await sbDelete('apps', { id: appId }, session).catch(() => {});
       }
-      setError(err.message + (appId ? ' — the incomplete listing was removed, please try again.' : ''));
+      setError(humanizeAppError(err).message + (appId ? ' — the incomplete listing was removed; try again after permissions are fixed.' : ''));
       setStep('');
     } finally {
       setLoading(false);
@@ -3825,7 +3873,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     try {
       const appId = editingApp.id;
       // Match id + dev_id so RLS "own apps only" policies succeed
-      const appMatch = { id: appId, dev_id: profile.id };
+      const appMatch = profile?.is_owner ? { id: appId } : { id: appId, dev_id: profile.id };
       await sbUpdate('apps', {
         name: editForm.name.trim(),
         tagline: editForm.tagline.trim(),
@@ -3895,7 +3943,9 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
       await loadMyApps();
       onPublished?.();
     } catch (e) {
-      showToast?.(e.message || 'Update failed', 'error');
+      const h = humanizeAppError(e);
+      setError(h.message);
+      showToast?.(h.message, { type: 'error', reportable: h.reportable, stack: h.stack, where: h.where || 'saveEdit' });
     } finally {
       setEditSaving(false);
     }
@@ -3966,7 +4016,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
               <p className={`text-[12px] ${subtext}`}>
                 This name appears under your apps in the store. You can publish, track status, and edit listings after setup.
               </p>
-              {setupError && <p className="text-red-500 text-[13px] font-medium">{setupError}</p>}
+              {setupError && <p className="text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[13px] font-medium">{setupError}</p>}
               <button type="submit" disabled={setupBusy}
                 className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 disabled:opacity-50">
                 {setupBusy ? 'Creating…' : 'Create developer account'}
@@ -4716,7 +4766,15 @@ function AdminDashboard({ session, profile, onClose, dark, showToast }) {
       </div>
 
       <div className="max-w-3xl mx-auto px-4 md:px-8 py-6">
-        {error && <p className="text-red-500 text-[13px] font-medium mb-4">{error}</p>}
+        {error && (
+          <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900 leading-snug">
+            <p className="font-semibold">{error}</p>
+            <button type="button" className="mt-2 text-[12px] font-bold text-violet-700"
+              onClick={() => reportErrorToSupport(buildErrorReportPayload({ message: error, where: 'dev_console' }))}>
+              Send error log
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           <div className={`rounded-2xl p-4 ${card}`}>
