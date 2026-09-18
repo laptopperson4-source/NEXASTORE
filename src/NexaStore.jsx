@@ -1170,7 +1170,7 @@ async function enrichAppsWithDevelopers(apps) {
  */
 const ADSENSE_CLIENT = 'ca-pub-5401026147718678';
 /** Optional: after you create a Display ad unit in AdSense, paste the slot id here (digits only). */
-const ADSENSE_SLOT = '';
+const ADSENSE_SLOT = '7922429417';
 
 function WindmillAdSense({ active, rounded }) {
   const insRef = useRef(null);
@@ -1211,8 +1211,8 @@ function WindmillAdSense({ active, rounded }) {
           className="adsbygoogle"
           style={{ display: 'block', width: '100%', minHeight: 90, maxHeight: '100%' }}
           data-ad-client={ADSENSE_CLIENT}
-          {...(ADSENSE_SLOT ? { 'data-ad-slot': ADSENSE_SLOT } : {})}
-          data-ad-format="horizontal"
+          data-ad-slot={ADSENSE_SLOT}
+          data-ad-format="auto"
           data-full-width-responsive="true"
         />
       </div>
