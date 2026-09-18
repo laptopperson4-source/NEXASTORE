@@ -417,6 +417,82 @@ function hasPurchased(appId, userId) {
   return (all[key] || []).includes(appId);
 }
 
+const DOWNLOADS_KEY = 'nexastore_downloads_v1';
+
+function getDownloadHistory() {
+  try {
+    const raw = localStorage.getItem(DOWNLOADS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function markDownloaded(app) {
+  if (!app?.id) return;
+  const list = getDownloadHistory().filter((d) => d.appId !== app.id);
+  list.unshift({
+    appId: app.id,
+    name: app.name || 'App',
+    logo_url: app.logo_url || null,
+    category: app.category || null,
+    tagline: app.tagline || null,
+    price: app.price,
+    downloadedAt: new Date().toISOString(),
+  });
+  try {
+    localStorage.setItem(DOWNLOADS_KEY, JSON.stringify(list.slice(0, 100)));
+  } catch {}
+}
+
+function resolveDownloadApps(allApps) {
+  const hist = getDownloadHistory();
+  const byId = Object.fromEntries((allApps || []).map((a) => [a.id, a]));
+  return hist.map((h) => {
+    const live = byId[h.appId];
+    return live
+      ? { ...live, downloadedAt: h.downloadedAt }
+      : {
+          id: h.appId,
+          name: h.name,
+          logo_url: h.logo_url,
+          category: h.category,
+          tagline: h.tagline,
+          price: h.price,
+          downloadedAt: h.downloadedAt,
+          status: 'approved',
+        };
+  });
+}
+
+/** Mobile-friendly download status via Notification API (best-effort). */
+async function ensureNotifPermission() {
+  try {
+    if (typeof Notification === 'undefined') return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    const r = await Notification.requestPermission();
+    return r === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+function showDownloadNotification(title, body, tag) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return null;
+    return new Notification(title, {
+      body,
+      tag: tag || 'nexastore-download',
+      renotify: true,
+      silent: false,
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function resolvePayoutWallet(app) {
   try {
     if (app?.dev_id) {
@@ -4292,6 +4368,30 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
 }
 
 
+
+function DownloadProgressBanner({ installState }) {
+  if (!installState || installState.progress >= 1) return null;
+  const pct = Math.round((installState.progress || 0) * 100);
+  const name = installState.appName || 'App';
+  return (
+    <div className="fixed top-0 inset-x-0 z-[280] pointer-events-none">
+      <div className="mx-auto max-w-lg pointer-events-auto m-2 rounded-2xl bg-white shadow-xl border border-gray-200 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div className="px-4 py-3 flex items-center gap-3">
+          <Loader2 size={18} className="animate-spin text-violet-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-bold text-gray-900 truncate">Downloading {name}</p>
+            <p className="text-[11px] text-gray-500">Keep this tab open — works in the background until you close the browser</p>
+          </div>
+          <span className="text-[13px] font-extrabold text-violet-600 tabular-nums">{pct}%</span>
+        </div>
+        <div className="h-1.5 bg-gray-100">
+          <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all duration-300" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToastStack({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   return (
@@ -5502,6 +5602,11 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
 }
 
 function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, onOpenAffiliateAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
+  const [downloadApps, setDownloadApps] = useState(() => resolveDownloadApps(filteredApps));
+  useEffect(() => {
+    setDownloadApps(resolveDownloadApps(filteredApps));
+  }, [filteredApps, view, installState?.status]);
+
   const dark = false;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -5511,15 +5616,46 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
   const viewTitles = { discover: 'Discover', charts: 'Top Charts', categories: 'Categories', updates: 'Updates', profile: 'Profile' };
 
   useEffect(() => {
-    if (view !== 'wishlist' || !session || !profile) return;
+    if (view !== 'wishlist') return;
+    if (!session || !profile) {
+      setWishlistApps([]);
+      setWishlistLoading(false);
+      return;
+    }
     let cancelled = false;
     setWishlistLoading(true);
-    sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,apps(*)`, session)
-      .then(rows => { if (!cancelled) setWishlistApps((rows || []).map(r => r.apps).filter(Boolean)); })
-      .catch(() => { if (!cancelled) setWishlistApps([]); })
-      .finally(() => { if (!cancelled) setWishlistLoading(false); });
+    (async () => {
+      try {
+        let rows = await sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,app_id,apps(*)`, session).catch(() => null);
+        if (!Array.isArray(rows)) {
+          rows = await sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,app_id`, session).catch(() => []);
+        }
+        const apps = [];
+        for (const r of rows || []) {
+          if (r.apps && (r.apps.id || r.apps.name)) {
+            apps.push(r.apps);
+            continue;
+          }
+          const id = r.app_id;
+          if (!id) continue;
+          const found = (filteredApps || []).find((a) => a.id === id);
+          if (found) apps.push(found);
+          else {
+            try {
+              const one = await sbSelect('apps', `id=eq.${id}&select=*&limit=1`, session);
+              if (one?.[0]) apps.push(one[0]);
+            } catch {}
+          }
+        }
+        if (!cancelled) setWishlistApps(apps);
+      } catch {
+        if (!cancelled) setWishlistApps([]);
+      } finally {
+        if (!cancelled) setWishlistLoading(false);
+      }
+    })();
     return () => { cancelled = true; };
-  }, [view, session, profile]);
+  }, [view, session, profile?.id, filteredApps]);
 
   return (
     <div className="hidden md:flex min-h-screen bg-white w-full">
@@ -5708,15 +5844,38 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                 {view === 'wishlist' && wishlistLoading && (
                   <p className="text-center py-16 text-gray-400 text-sm">Loading your wishlist…</p>
                 )}
-                {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 ? (
+                {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 && (
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                     {wishlistApps.map((app, i) => (
                       <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={dark} />
                     ))}
                   </div>
-                ) : (!(view === 'wishlist' && wishlistLoading) && (
-                  <EmptyLibraryState view={view} session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
-                ))}
+                )}
+                {view === 'downloads' && (
+                  (downloadApps || []).length === 0 ? (
+                    <EmptyLibraryState view="downloads" session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
+                      {(downloadApps || []).map((app, i) => (
+                        <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={dark} />
+                      ))}
+                    </div>
+                  )
+                )}
+                {(view === 'myapps' || view === 'installed') && (
+                  (filteredApps || []).filter((a) => isOwned?.(a)).length === 0 ? (
+                    <EmptyLibraryState view={view} session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
+                      {(filteredApps || []).filter((a) => isOwned?.(a)).map((app, i) => (
+                        <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={true} dark={dark} />
+                      ))}
+                    </div>
+                  )
+                )}
+                {view === 'wishlist' && !wishlistLoading && wishlistApps.length === 0 && (
+                  <EmptyLibraryState view="wishlist" session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+                )}
               </div>
             )}
 
@@ -5783,6 +5942,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
   const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [downloadApps, setDownloadApps] = useState(() => resolveDownloadApps(filteredApps));
   const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist'];
   const libraryMenu = [
     { id: 'myapps', label: 'My Apps', icon: Gamepad2 },
@@ -5797,15 +5957,50 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
     : '';
 
   useEffect(() => {
-    if (view !== 'wishlist' || !session || !profile) return;
+    setDownloadApps(resolveDownloadApps(filteredApps));
+  }, [filteredApps, view, installState?.status, installState?.appId]);
+
+  useEffect(() => {
+    if (view !== 'wishlist') return;
+    if (!session || !profile) {
+      setWishlistApps([]);
+      setWishlistLoading(false);
+      return;
+    }
     let cancelled = false;
     setWishlistLoading(true);
-    sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,apps(*)`, session)
-      .then(rows => { if (!cancelled) setWishlistApps((rows || []).map(r => r.apps).filter(Boolean)); })
-      .catch(() => { if (!cancelled) setWishlistApps([]); })
-      .finally(() => { if (!cancelled) setWishlistLoading(false); });
+    (async () => {
+      try {
+        let rows = await sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,app_id,apps(*)`, session).catch(() => null);
+        if (!Array.isArray(rows)) {
+          rows = await sbSelect('wishlists', `user_id=eq.${profile.id}&select=id,app_id`, session).catch(() => []);
+        }
+        const apps = [];
+        for (const r of rows || []) {
+          if (r.apps && (r.apps.id || r.apps.name)) {
+            apps.push(r.apps);
+            continue;
+          }
+          const id = r.app_id;
+          if (!id) continue;
+          const found = (filteredApps || []).find((a) => a.id === id);
+          if (found) apps.push(found);
+          else {
+            try {
+              const one = await sbSelect('apps', `id=eq.${id}&select=*&limit=1`, session);
+              if (one?.[0]) apps.push(one[0]);
+            } catch {}
+          }
+        }
+        if (!cancelled) setWishlistApps(apps);
+      } catch {
+        if (!cancelled) setWishlistApps([]);
+      } finally {
+        if (!cancelled) setWishlistLoading(false);
+      }
+    })();
     return () => { cancelled = true; };
-  }, [view, session, profile]);
+  }, [view, session, profile?.id, filteredApps]);
 
   return (
     <div className="md:hidden min-h-screen w-full bg-[#f8f9fa] text-gray-900 pb-24">
@@ -6086,15 +6281,61 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
           {view === 'wishlist' && wishlistLoading && (
             <p className="text-center py-10 text-gray-500 text-sm">Loading your wishlist…</p>
           )}
-          {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 ? (
+          {view === 'wishlist' && !wishlistLoading && wishlistApps.length > 0 && (
             <div className="grid grid-cols-3 gap-x-3 gap-y-5">
               {wishlistApps.map((app, i) => (
                 <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={dark} />
               ))}
             </div>
-          ) : (!(view === 'wishlist' && wishlistLoading) && (
-            <EmptyLibraryState view={view} session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
-          ))}
+          )}
+          {view === 'downloads' && (
+            <div className="space-y-2">
+              {(downloadApps || []).length === 0 ? (
+                <EmptyLibraryState view="downloads" session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+              ) : (
+                (downloadApps || []).map((app, i) => (
+                  <div key={app.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white border border-gray-100">
+                    <button type="button" className="flex items-center gap-3 flex-1 min-w-0 text-left" onClick={() => onOpenApp(app)}>
+                      {app.logo_url ? (
+                        <img src={app.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-[14px] text-gray-900 truncate">{app.name}</p>
+                        <p className="text-[11.5px] text-gray-500">
+                          {app.downloadedAt ? `Downloaded ${new Date(app.downloadedAt).toLocaleDateString()}` : 'Downloaded'}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleInstall(app)}
+                      className="px-3 py-2 rounded-xl text-[12px] font-bold text-white bg-emerald-600 flex-shrink-0"
+                    >
+                      {installState?.appId === app.id ? `${Math.round((installState.progress || 0) * 100)}%` : 'Get again'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          {(view === 'myapps' || view === 'installed') && (
+            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
+              {(filteredApps || []).filter((a) => isOwned?.(a)).length === 0 ? (
+                <div className="col-span-3">
+                  <EmptyLibraryState view={view} session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+                </div>
+              ) : (
+                (filteredApps || []).filter((a) => isOwned?.(a)).map((app, i) => (
+                  <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={true} dark={dark} />
+                ))
+              )}
+            </div>
+          )}
+          {view === 'wishlist' && !wishlistLoading && wishlistApps.length === 0 && (
+            <EmptyLibraryState view="wishlist" session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
+          )}
         </div>
       )}
 
@@ -6413,7 +6654,18 @@ function NexaStore() {
   };
 
   const doDownload = async (app) => {
-    setInstallState({ appId: app.id, progress: 0 });
+    setInstallState({ appId: app.id, appName: app.name, progress: 0, status: 'starting' });
+    // Ask once for notification permission (mobile progress surface)
+    const canNotify = await ensureNotifPermission();
+    if (canNotify) {
+      showDownloadNotification(
+        `Downloading ${app.name}`,
+        'Keep this tab open — download continues in the background until the browser is closed.',
+        `dl-${app.id}`
+      );
+    } else {
+      showToast(`Downloading ${app.name}… Keep this tab open until it finishes.`, 'info', 5000);
+    }
     try {
       const bits = await sbSelect('app_bits', `app_id=eq.${app.id}&select=*&order=bit_index`, session);
       if (!bits.length) {
@@ -6425,12 +6677,27 @@ function NexaStore() {
       const totalSize = bits.reduce((s, b) => s + (b.size_bytes || 0), 0) || app.total_size_bytes || 0;
       let doneSoFar = 0;
       const parts = [];
+      let lastNotifPct = -1;
 
       for (const bit of bits) {
         const bitSize = bit.size_bytes || (totalSize / bits.length) || 0;
         const blob = await sbDownload(bit.bucket_id, bit.storage_path, session, (frac) => {
           const overall = totalSize > 0 ? (doneSoFar + frac * bitSize) / totalSize : frac;
-          setInstallState({ appId: app.id, progress: Math.min(overall, 0.99) });
+          const progress = Math.min(overall, 0.99);
+          setInstallState({ appId: app.id, appName: app.name, progress, status: 'downloading' });
+          // Update browser notification every ~10%
+          const pct = Math.round(progress * 100);
+          if (canNotify && pct >= lastNotifPct + 10) {
+            lastNotifPct = pct;
+            showDownloadNotification(
+              `Downloading ${app.name}`,
+              `${pct}% complete — leave this tab open`,
+              `dl-${app.id}`
+            );
+          }
+          try {
+            document.title = `${pct}% · ${app.name}`;
+          } catch {}
         });
         doneSoFar += bitSize || blob.size;
         parts.push(blob);
@@ -6444,13 +6711,23 @@ function NexaStore() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Keep blob URL briefly so background save can finish on mobile
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
 
-      setInstallState({ appId: app.id, progress: 1 });
+      markDownloaded(app);
+      setInstallState({ appId: app.id, appName: app.name, progress: 1, status: 'done' });
+      if (canNotify) {
+        showDownloadNotification(`${app.name} ready`, 'Download finished. Open your Downloads folder / notification.', `dl-${app.id}-done`);
+      }
       showToast(`${app.name} downloaded`, 'success');
-      setTimeout(() => setInstallState(null), 1000);
+      try { document.title = 'NexaStore'; } catch {}
+      setTimeout(() => setInstallState(null), 1800);
     } catch (e) {
       setInstallState(null);
+      try { document.title = 'NexaStore'; } catch {}
+      if (canNotify) {
+        showDownloadNotification(`Download failed`, e.message || 'Try again', `dl-${app.id}-fail`);
+      }
       showToast(e.message || 'Download failed — please try again.', 'error');
     }
   };
@@ -6659,6 +6936,7 @@ function NexaStore() {
           </div>
         </div>
       )}
+      <DownloadProgressBanner installState={installState} />
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
