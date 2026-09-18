@@ -1163,28 +1163,134 @@ async function enrichAppsWithDevelopers(apps) {
   }));
 }
 
-const BANNERS = [
-  '/banner-discover.png',
-  '/banner-developer.png',
-  '/banner-gaming.png',
-  '/banner-usdt.png',
+/**
+ * Hero "windmill" carousel — the ONLY place ads appear in NexaStore.
+ * Organic store banners + optional sponsored slides (image + link).
+ * Third-party networks can later plug in via type: 'adsense' once you have a publisher id.
+ */
+const HERO_SLIDES = [
+  {
+    id: 'discover',
+    type: 'organic',
+    src: '/banner-discover.png',
+    alt: 'Discover apps on NexaStore',
+  },
+  {
+    id: 'developer',
+    type: 'organic',
+    src: '/banner-developer.png',
+    alt: 'Publish on NexaStore',
+  },
+  // Sponsored slot — stays inside the windmill only. Replace src/href when you have a real advertiser.
+  {
+    id: 'ad-affiliate',
+    type: 'ad',
+    src: '/banner-usdt.png',
+    alt: 'Earn with NexaStore affiliates',
+    href: '/affiliates/',
+    label: 'Sponsored',
+    advertiser: 'NexaStore Affiliates',
+  },
+  {
+    id: 'gaming',
+    type: 'organic',
+    src: '/banner-gaming.png',
+    alt: 'Games on NexaStore',
+  },
+  {
+    id: 'usdt',
+    type: 'organic',
+    src: '/banner-usdt.png',
+    alt: 'Pay with USDT on Polygon',
+  },
 ];
 
+// Legacy alias if anything still references BANNERS
+const BANNERS = HERO_SLIDES.map((s) => s.src);
+
 function BannerCarousel({ rounded = 'rounded-[28px]', maxHeight = '360px', dotBottom = 'bottom-5' }) {
+  const slides = HERO_SLIDES;
   const [idx, setIdx] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setIdx(p => (p + 1) % BANNERS.length), 6000);
+    if (slides.length < 2) return undefined;
+    const t = setInterval(() => setIdx((p) => (p + 1) % slides.length), 6000);
     return () => clearInterval(t);
-  }, []);
+  }, [slides.length]);
+
+  const go = (href) => {
+    if (!href) return;
+    if (href.startsWith('http')) {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    } else {
+      window.location.href = href;
+    }
+  };
+
   return (
-    <div className={`w-full ${rounded} overflow-hidden relative bg-slate-900`} style={{ aspectRatio: '1774/887', maxHeight }}>
-      {BANNERS.map((src, i) => (
-        <img key={src} src={src} alt="NexaStore banner"
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${i === idx ? 'opacity-100' : 'opacity-0'}`} />
-      ))}
-      <div className={`absolute ${dotBottom} left-1/2 -translate-x-1/2 flex gap-1.5`}>
-        {BANNERS.map((_, i) => (
-          <button key={i} onClick={() => setIdx(i)} className={`h-1.5 rounded-full transition-all ${i === idx ? 'bg-white w-6' : 'bg-white/45 w-1.5'}`} />
+    <div
+      className={`w-full ${rounded} overflow-hidden relative bg-slate-900`}
+      style={{ aspectRatio: '1774/887', maxHeight }}
+      role="region"
+      aria-label="NexaStore banners"
+    >
+      {slides.map((slide, i) => {
+        const active = i === idx;
+        const isAd = slide.type === 'ad' || slide.type === 'sponsored';
+        const body = (
+          <>
+            <img
+              src={slide.src}
+              alt={slide.alt || (isAd ? 'Sponsored' : 'NexaStore banner')}
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${active ? 'opacity-100' : 'opacity-0'}`}
+              draggable={false}
+            />
+            {isAd && active && (
+              <div className="absolute top-3 left-3 z-[2] flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-black/55 text-white backdrop-blur-sm border border-white/20">
+                  {slide.label || 'Ad'}
+                </span>
+                {slide.advertiser && (
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-black/40 text-white/90 backdrop-blur-sm">
+                    {slide.advertiser}
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        );
+        if (isAd && slide.href) {
+          return (
+            <button
+              key={slide.id || i}
+              type="button"
+              onClick={() => active && go(slide.href)}
+              className={`absolute inset-0 w-full h-full text-left ${active ? 'z-[1] cursor-pointer' : 'z-0 pointer-events-none'}`}
+              aria-hidden={!active}
+              aria-label={slide.alt || 'Sponsored banner'}
+            >
+              {body}
+            </button>
+          );
+        }
+        return (
+          <div
+            key={slide.id || i}
+            className={`absolute inset-0 ${active ? 'z-[1]' : 'z-0 pointer-events-none'}`}
+            aria-hidden={!active}
+          >
+            {body}
+          </div>
+        );
+      })}
+      <div className={`absolute ${dotBottom} left-1/2 -translate-x-1/2 flex gap-1.5 z-[3]`}>
+        {slides.map((slide, i) => (
+          <button
+            key={slide.id || i}
+            type="button"
+            onClick={() => setIdx(i)}
+            aria-label={`Banner ${i + 1}${slide.type === 'ad' ? ' (sponsored)' : ''}`}
+            className={`h-1.5 rounded-full transition-all ${i === idx ? 'bg-white w-6' : 'bg-white/45 w-1.5'}`}
+          />
         ))}
       </div>
     </div>
