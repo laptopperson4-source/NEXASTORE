@@ -1168,6 +1168,58 @@ async function enrichAppsWithDevelopers(apps) {
  * Organic store banners + optional sponsored slides (image + link).
  * Third-party networks can later plug in via type: 'adsense' once you have a publisher id.
  */
+const ADSENSE_CLIENT = 'ca-pub-5401026147718678';
+/** Optional: after you create a Display ad unit in AdSense, paste the slot id here (digits only). */
+const ADSENSE_SLOT = '';
+
+function WindmillAdSense({ active, rounded }) {
+  const insRef = useRef(null);
+  const pushed = useRef(false);
+  useEffect(() => {
+    if (!active || pushed.current) return;
+    // Wait a tick so the ins is in the DOM and visible
+    const t = setTimeout(() => {
+      try {
+        if (!insRef.current) return;
+        // Avoid double-fill
+        if (insRef.current.getAttribute('data-adsbygoogle-status')) {
+          pushed.current = true;
+          return;
+        }
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+        pushed.current = true;
+      } catch (e) {
+        console.warn('[AdSense]', e?.message || e);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [active]);
+
+  return (
+    <div
+      className={`absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 transition-opacity duration-700 ${active ? 'opacity-100 z-[1]' : 'opacity-0 z-0 pointer-events-none'}`}
+      aria-hidden={!active}
+    >
+      <div className="absolute top-3 left-3 z-[2]">
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-black/55 text-white border border-white/20">
+          Ad
+        </span>
+      </div>
+      <div className="w-full h-full flex items-center justify-center px-2 py-6">
+        <ins
+          ref={insRef}
+          className="adsbygoogle"
+          style={{ display: 'block', width: '100%', minHeight: 90, maxHeight: '100%' }}
+          data-ad-client={ADSENSE_CLIENT}
+          {...(ADSENSE_SLOT ? { 'data-ad-slot': ADSENSE_SLOT } : {})}
+          data-ad-format="horizontal"
+          data-full-width-responsive="true"
+        />
+      </div>
+    </div>
+  );
+}
+
 const HERO_SLIDES = [
   {
     id: 'discover',
@@ -1181,15 +1233,12 @@ const HERO_SLIDES = [
     src: '/banner-developer.png',
     alt: 'Publish on NexaStore',
   },
-  // Sponsored slot — stays inside the windmill only. Replace src/href when you have a real advertiser.
+  // AdSense — ONLY in the windmill. Create a Display unit in AdSense and set ADSENSE_SLOT if you have one.
   {
-    id: 'ad-affiliate',
-    type: 'ad',
-    src: '/banner-usdt.png',
-    alt: 'Earn with NexaStore affiliates',
-    href: '/affiliates/',
-    label: 'Sponsored',
-    advertiser: 'NexaStore Affiliates',
+    id: 'adsense-windmill',
+    type: 'adsense',
+    alt: 'Advertisement',
+    label: 'Ad',
   },
   {
     id: 'gaming',
@@ -1235,6 +1284,9 @@ function BannerCarousel({ rounded = 'rounded-[28px]', maxHeight = '360px', dotBo
     >
       {slides.map((slide, i) => {
         const active = i === idx;
+        if (slide.type === 'adsense') {
+          return <WindmillAdSense key={slide.id || i} active={active} rounded={rounded} />;
+        }
         const isAd = slide.type === 'ad' || slide.type === 'sponsored';
         const body = (
           <>
