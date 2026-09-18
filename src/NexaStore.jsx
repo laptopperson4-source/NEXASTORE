@@ -1351,7 +1351,7 @@ function AuthModal({ onClose, onAuth }) {
           </div>
           )}
 
-          {error && <p className="text-red-600 text-[13px] font-medium">{error}</p>}
+          {error && <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[13px] font-medium leading-snug">{error}</p>}
           {info && <p className="text-emerald-600 text-[13px] font-medium">{info}</p>}
 
           <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white py-2.5 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 text-[14px]">
@@ -1578,7 +1578,7 @@ function WalletSetupModal({ onClose, onConnected, dark, onOpenTutorial }) {
               className={`${inputCls} mt-1.5`} />
           </div>
 
-          {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
+          {error && <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[13px] font-medium leading-snug">{error}</p>}
 
           <div className="pt-1 pb-2">
             <button type="button" onClick={connect}
@@ -1884,7 +1884,157 @@ function metamaskUsdtSendLink(toAddress, amountUsdt, network) {
 
 
 /** Support replies — written as a human support agent (no AI disclosure). */
+
 const SUPPORT_MAILTO = 'help@nexapulse.pro'; // support inbox — shown only via mailto / contact page
+const ERROR_REPORT_MAILTO = 'help@nexapulse.pro';
+
+function buildErrorReportPayload({ message, stack, where, extra }) {
+  const visitor = (() => {
+    try { return localStorage.getItem('nexastore_visitor_id') || ''; } catch { return ''; }
+  })();
+  return {
+    at: new Date().toISOString(),
+    url: typeof window !== 'undefined' ? window.location.href : '',
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    visitorId: visitor,
+    where: where || 'unknown',
+    message: String(message || 'Unknown error').slice(0, 800),
+    stack: String(stack || '').slice(0, 2500),
+    extra: extra ? String(extra).slice(0, 1000) : '',
+  };
+}
+
+/** Open mail client with a prefilled error log for the NexaStore team. */
+function reportErrorToSupport(payload) {
+  const p = payload || buildErrorReportPayload({});
+  const subject = encodeURIComponent(`NexaStore error report · ${p.where || 'app'}`);
+  const body = encodeURIComponent(
+    [
+      'A NexaStore user reported an error.',
+      '',
+      `When: ${p.at}`,
+      `Page: ${p.url}`,
+      `Where: ${p.where}`,
+      `Visitor ID: ${p.visitorId || '(none)'}`,
+      '',
+      `Message: ${p.message}`,
+      '',
+      'Stack / details:',
+      p.stack || '(none)',
+      p.extra ? `\nExtra:\n${p.extra}` : '',
+      '',
+      `User-Agent: ${p.userAgent}`,
+    ].join('\n')
+  );
+  const href = `mailto:${ERROR_REPORT_MAILTO}?subject=${subject}&body=${body}`;
+  try {
+    const a = document.createElement('a');
+    a.href = href;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch {
+    try { window.location.href = href; } catch {}
+  }
+  return href;
+}
+
+/** Soft in-app error card (not a red console dump). Reportable = user can't fix it. */
+function AppErrorCard({ title, message, reportable = true, onRetry, onDismiss, where, stack, dark }) {
+  const [sent, setSent] = useState(false);
+  const bg = dark ? 'bg-[#12172f] border-white/10' : 'bg-white border-gray-200';
+  const text = dark ? 'text-white' : 'text-gray-900';
+  const sub = dark ? 'text-slate-400' : 'text-gray-500';
+  return (
+    <div className={`rounded-2xl border shadow-lg p-4 ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className="flex items-start gap-3">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${dark ? 'bg-amber-500/15' : 'bg-amber-50'}`}>
+          <AlertCircle size={20} className="text-amber-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`font-bold text-[14px] ${text}`}>{title || 'Something went wrong'}</p>
+          <p className={`text-[13px] mt-1 leading-relaxed ${sub}`}>
+            {message || 'Please try again in a moment.'}
+          </p>
+          {reportable && (
+            <p className={`text-[12px] mt-2 ${sub}`}>
+              {sent
+                ? 'Thanks — if your email app opened, send the message so we can investigate. Try again later.'
+                : "If this keeps happening, send us an error log. We'll look into it — then try again later."}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 mt-3">
+            {onRetry && (
+              <button type="button" onClick={onRetry}
+                className="px-3.5 py-2 rounded-xl text-[12.5px] font-bold text-white bg-violet-600 hover:bg-violet-700">
+                Try again
+              </button>
+            )}
+            {reportable && !sent && (
+              <button
+                type="button"
+                onClick={() => {
+                  reportErrorToSupport(buildErrorReportPayload({ message, stack, where }));
+                  setSent(true);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-[12.5px] font-bold ${dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}
+              >
+                Send error log
+              </button>
+            )}
+            {onDismiss && (
+              <button type="button" onClick={onDismiss}
+                className={`px-3.5 py-2 rounded-xl text-[12.5px] font-semibold ${sub}`}>
+                Dismiss
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    try {
+      console.warn('[NexaStore]', error?.message || error, info?.componentStack);
+    } catch {}
+  }
+  render() {
+    if (this.state.error) {
+      const err = this.state.error;
+      return (
+        <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+          <div className="w-full max-w-md">
+            <AppErrorCard
+              title="NexaStore hit a problem"
+              message={err?.message || 'An unexpected error stopped this screen from loading.'}
+              reportable
+              where="ErrorBoundary"
+              stack={err?.stack}
+              onRetry={() => {
+                this.setState({ error: null });
+                try { window.location.reload(); } catch {}
+              }}
+            />
+            <p className="text-center text-[12px] text-gray-400 mt-4">NexaStore · app.nexapulse.pro</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 
 function openRealSupportEmail({ subject, body } = {}) {
   const s = encodeURIComponent(subject || 'NexaStore support');
@@ -2533,7 +2683,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                     </span>
                   </label>
                   {error && stage === 'form' && (
-                    <p className="text-[12px] text-red-500 font-medium leading-snug">{error}</p>
+                    <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 font-medium leading-snug">{error}</p>
                   )}
                 </div>
 
@@ -2566,7 +2716,7 @@ function PaymentModal({ app, session, profile, wallet, onClose, onPaid, onNeedWa
                   <p className={`text-[11.5px] leading-relaxed ${subtext}`}>
                     Creates your order and opens your <b className={text}>browser wallet extension</b> with {lockedPrice} USDT on {payNetwork.name} to NexaPay — no extra download pages.
                   </p>
-                  {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+                  {error && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-center leading-snug">{error}</p>}
                   <button
                     type="button"
                     onClick={startPayment}
@@ -3974,7 +4124,7 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
             <FileDropField label="App icon / logo" hint="Square image, PNG or JPG — required" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
             <FileDropField label="Screenshots" hint="At least 3 images — required" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
 
-            {error && <p className="text-red-500 text-[13px] font-medium">{error}</p>}
+            {error && <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[13px] font-medium leading-snug">{error}</p>}
             {success && <p className="text-emerald-500 text-[13px] font-medium">{success}</p>}
             {step && !error && <p className="text-violet-500 text-[13px] font-medium">{step}</p>}
 
@@ -4096,16 +4246,49 @@ function ToastStack({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   return (
     <div className="fixed bottom-24 md:bottom-6 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2 items-stretch px-4 w-full max-w-sm pointer-events-none">
-      {toasts.map(t => (
-        <div key={t.id} className={`pointer-events-auto rounded-xl px-4 py-3 shadow-lg flex items-start gap-2.5 text-[13.5px] font-medium ${t.type === 'error' ? 'bg-red-600 text-white' : t.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-gray-900 text-white'}`} style={{ fontFamily: "'Inter', sans-serif" }}>
-          {t.type === 'error' && <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />}
-          {t.type === 'success' && <CheckCircle2 size={18} className="flex-shrink-0 mt-0.5" />}
-          <span className="flex-1 leading-snug">{t.message}</span>
-          <button onClick={() => onDismiss(t.id)} className="flex-shrink-0 opacity-80 hover:opacity-100">
-            <X size={16} />
-          </button>
-        </div>
-      ))}
+      {toasts.map((t) => {
+        const isErr = t.type === 'error' || t.type === 'fatal';
+        const isOk = t.type === 'success';
+        const shell = isErr
+          ? 'bg-white border border-amber-200 text-gray-900 shadow-xl'
+          : isOk
+            ? 'bg-emerald-600 text-white shadow-lg'
+            : 'bg-gray-900 text-white shadow-lg';
+        return (
+          <div
+            key={t.id}
+            className={`pointer-events-auto rounded-2xl px-4 py-3 flex items-start gap-2.5 text-[13.5px] font-medium ${shell}`}
+            style={{ fontFamily: "'Inter', sans-serif" }}
+          >
+            {isErr && <AlertCircle size={18} className="flex-shrink-0 mt-0.5 text-amber-500" />}
+            {isOk && <CheckCircle2 size={18} className="flex-shrink-0 mt-0.5" />}
+            <div className="flex-1 min-w-0">
+              <span className="leading-snug block">{t.message}</span>
+              {(t.reportable || t.type === 'fatal') && (
+                <button
+                  type="button"
+                  className="mt-2 text-[12px] font-bold text-violet-600 hover:text-violet-700"
+                  onClick={() => {
+                    reportErrorToSupport(
+                      buildErrorReportPayload({
+                        message: t.message,
+                        stack: t.stack,
+                        where: t.where || 'toast',
+                      })
+                    );
+                    onDismiss(t.id);
+                  }}
+                >
+                  Send error log to support
+                </button>
+              )}
+            </div>
+            <button type="button" onClick={() => onDismiss(t.id)} className={`flex-shrink-0 opacity-70 hover:opacity-100 ${isErr ? 'text-gray-500' : ''}`}>
+              <X size={16} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -5963,7 +6146,7 @@ function AffiliatePortal({ session, profile, paidApps, showToast, onAuth, onSign
   );
 }
 
-export default function NexaStore() {
+function NexaStore() {
   const [view, setView] = useState('home');
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -6018,6 +6201,7 @@ export default function NexaStore() {
 
   const [showAdmin, setShowAdmin] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [fatalError, setFatalError] = useState(null);
   const [installState, setInstallState] = useState(null);
   const [wallet, setWallet] = useState(() => getStoredWallet());
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -6027,9 +6211,27 @@ export default function NexaStore() {
   const [activeTutorial, setActiveTutorial] = useState(null);
 
   const showToast = (message, type = 'info', duration = 4200) => {
+    // showToast(msg, 'error') or showToast(msg, { type, reportable, stack, where, duration })
+    let opts = { type: 'info', duration: 4200, reportable: false };
+    if (type && typeof type === 'object') {
+      opts = { ...opts, ...type };
+    } else {
+      opts.type = type || 'info';
+      opts.duration = duration;
+      if (type === 'fatal') opts.reportable = true;
+    }
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, message, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), duration);
+    const entry = {
+      id,
+      message: String(message || ''),
+      type: opts.type,
+      reportable: !!opts.reportable || opts.type === 'fatal',
+      stack: opts.stack || '',
+      where: opts.where || '',
+    };
+    setToasts((t) => [...t, entry]);
+    const ms = opts.reportable || opts.type === 'fatal' ? Math.max(opts.duration || 4200, 9000) : (opts.duration || 4200);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
   };
   const dismissToast = (id) => setToasts((t) => t.filter((x) => x.id !== id));
 
@@ -6105,6 +6307,30 @@ export default function NexaStore() {
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // Surface unexpected errors in-app (not as a red console wall for users)
+  useEffect(() => {
+    const onErr = (event) => {
+      const msg = event?.error?.message || event?.message || 'Unexpected error';
+      const stack = event?.error?.stack || '';
+      // Ignore noisy extension noise
+      if (/MaxListenersExceeded|ObjectMultiplex|ResizeObserver|Script error/i.test(msg)) return;
+      setFatalError({ message: msg, stack, where: 'window.onerror' });
+    };
+    const onRej = (event) => {
+      const reason = event?.reason;
+      const msg = reason?.message || String(reason || 'Unhandled promise error');
+      const stack = reason?.stack || '';
+      if (/MaxListenersExceeded|ObjectMultiplex|ResizeObserver/i.test(msg)) return;
+      setFatalError({ message: msg, stack, where: 'unhandledrejection' });
+    };
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onRej);
+    return () => {
+      window.removeEventListener('error', onErr);
+      window.removeEventListener('unhandledrejection', onRej);
+    };
   }, []);
 
   const openTutorialHub = () => setShowTutorialHub(true);
@@ -6360,7 +6586,30 @@ export default function NexaStore() {
           onClose={() => { setActiveTutorial(null); setShowTutorialHub(false); }}
         />
       )}
+      {fatalError && (
+        <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="w-full max-w-md">
+            <AppErrorCard
+              title="Something went wrong"
+              message={fatalError.message}
+              stack={fatalError.stack}
+              where={fatalError.where}
+              reportable
+              onRetry={() => { setFatalError(null); try { window.location.reload(); } catch {} }}
+              onDismiss={() => setFatalError(null)}
+            />
+          </div>
+        </div>
+      )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
+  );
+}
+
+export default function NexaStoreRoot() {
+  return (
+    <AppErrorBoundary>
+      <NexaStore />
+    </AppErrorBoundary>
   );
 }
