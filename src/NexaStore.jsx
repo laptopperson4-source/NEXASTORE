@@ -4262,264 +4262,357 @@ function DevConsole({ session, profile, onClose, onPublished, dark, showToast, o
     );
   }
 
-  return (
-    <div className={`fixed inset-0 z-50 overflow-auto ${bg}`} style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className={`sticky top-0 ${bg} border-b ${border} px-4 py-3 flex items-center gap-3 z-10`}>
-        <button onClick={onClose} className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} ${text}`}>
-          <ArrowLeft size={20} />
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className={`font-bold text-[15px] ${text} leading-tight`}>Developer Console</p>
-          <p className={`text-[11.5px] ${subtext}`}>{publicDevName(profile) || 'Your developer dashboard'} · charts, publish & edit</p>
+  // Full-screen edit workspace (separate from console dashboard)
+  if (editingApp) {
+    return (
+      <div className={`fixed inset-0 z-50 overflow-auto ${dark ? 'bg-[#070a16]' : 'bg-[#f3f4f6]'}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div className={`sticky top-0 z-20 border-b px-4 py-3 flex items-center gap-3 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200'}`}>
+          <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditSsSlots([]); setEditAppFile(null); setError(''); }}
+            className={`p-2 -ml-2 rounded-lg ${dark ? 'hover:bg-white/10 text-white' : 'hover:bg-gray-100 text-gray-800'}`}>
+            <ArrowLeft size={20} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className={`font-bold text-[15px] ${text} truncate`}>Edit · {editingApp.name}</p>
+            <p className={`text-[11.5px] ${subtext}`}>Listing, media & package</p>
+          </div>
+          {statusBadge(editingApp.status)}
+        </div>
+        <div className="max-w-2xl mx-auto px-4 py-6 space-y-4 pb-28">
+          {error && (
+            <div className={`rounded-xl border px-3 py-2.5 text-[12.5px] leading-snug ${dark ? 'bg-amber-500/10 border-amber-500/25 text-amber-100' : 'bg-amber-50 border-amber-100 text-amber-900'}`}>
+              <p className="font-semibold">{error}</p>
+            </div>
+          )}
+          <div className={`rounded-2xl border p-4 space-y-3 ${card}`}>
+            <p className={`text-[12px] font-bold uppercase tracking-wide ${subtext}`}>Store listing</p>
+            <input className={inputCls} value={editForm.name} onChange={setEdit('name')} placeholder="App name" />
+            <input className={inputCls} value={editForm.tagline} onChange={setEdit('tagline')} placeholder="Tagline" />
+            <textarea className={`${inputCls} min-h-[100px]`} value={editForm.description} onChange={setEdit('description')} placeholder="Description" />
+            <div className="grid grid-cols-2 gap-2">
+              <select className={inputCls} value={editForm.category} onChange={setEdit('category')}>
+                {Object.keys(categoryIconMap).map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input className={inputCls} value={editForm.price} onChange={setEdit('price')} placeholder="Price USDT (0 = free)" inputMode="decimal" />
+              <input className={inputCls} value={editForm.version} onChange={setEdit('version')} placeholder="Version" />
+              <input className={inputCls} value={editForm.releaseNotes} onChange={setEdit('releaseNotes')} placeholder="Release notes" />
+            </div>
+          </div>
+          <div className={`rounded-2xl border p-4 space-y-3 ${card}`}>
+            <p className={`text-[12px] font-bold uppercase tracking-wide ${subtext}`}>Icon</p>
+            <FileDropField label="App icon" hint="Square PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)} files={editLogoFile} dark={dark} />
+            {editingApp.logo_url && !editLogoFile && (
+              <img src={editingApp.logo_url} alt="" className="w-16 h-16 rounded-2xl object-cover" />
+            )}
+          </div>
+          <div className={`rounded-2xl border p-4 space-y-3 ${card}`}>
+            <p className={`text-[12px] font-bold uppercase tracking-wide ${subtext}`}>Screenshots — replace one at a time</p>
+            <p className={`text-[12px] ${subtext}`}>Pick a new image for a slot to replace only that screenshot.</p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {editSsSlots.map((slot, si) => (
+                <label key={si} className={`relative flex-shrink-0 w-28 h-48 rounded-xl overflow-hidden border-2 cursor-pointer ${slot.file ? 'border-violet-500' : dark ? 'border-white/15' : 'border-gray-200'}`}>
+                  {(slot.file ? URL.createObjectURL(slot.file) : slot.url) ? (
+                    <img src={slot.file ? URL.createObjectURL(slot.file) : slot.url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className={`w-full h-full flex items-center justify-center ${dark ? 'bg-white/5' : 'bg-gray-100'}`}><ImageIcon size={20} className={subtext} /></div>
+                  )}
+                  <span className="absolute bottom-1 inset-x-1 text-center text-[10px] font-bold bg-black/60 text-white rounded-md py-0.5">
+                    {slot.file ? 'New' : 'Replace'}
+                  </span>
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setEditSsSlots((prev) => prev.map((s, j) => (j === si ? { ...s, file: f } : s)));
+                  }} />
+                </label>
+              ))}
+            </div>
+            <button type="button" onClick={() => setEditSsSlots((prev) => [...prev, { index: prev.length, url: null, file: null }])}
+              className={`text-[12px] font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}>+ Add screenshot slot</button>
+          </div>
+          <div className={`rounded-2xl border p-4 ${card}`}>
+            <FileDropField label="App file" hint="New APK / ZIP / EXE (optional)" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setEditAppFile(e.target.files?.[0] || null)} files={editAppFile} dark={dark} />
+          </div>
+        </div>
+        <div className={`fixed bottom-0 inset-x-0 border-t p-4 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200'}`}>
+          <div className="max-w-2xl mx-auto flex gap-2">
+            <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditSsSlots([]); setEditAppFile(null); }}
+              className={`flex-1 py-3 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
+            <button type="button" onClick={saveEdit} disabled={editSaving}
+              className="flex-1 py-3 rounded-xl font-bold text-[13px] text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">
+              {editSaving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      <div className={`sticky top-[57px] z-10 ${bg} border-b ${border} px-4`}>
-        <div className="max-w-3xl mx-auto flex gap-1 overflow-x-auto">
+  return (
+    <div className={`fixed inset-0 z-50 flex flex-col ${dark ? 'bg-[#070a16]' : 'bg-[#eef0f4]'}`} style={{ fontFamily: "'Inter', sans-serif" }}>
+      {/* Console chrome */}
+      <header className={`flex-shrink-0 border-b px-3 sm:px-4 py-2.5 flex items-center gap-3 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-[#1e1e2e] border-black/20'}`}>
+        <button type="button" onClick={onClose} className="p-2 -ml-1 rounded-lg text-white/80 hover:bg-white/10">
+          <ArrowLeft size={18} />
+        </button>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-500 to-emerald-500 flex items-center justify-center flex-shrink-0">
+            <Code size={14} className="text-white" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[13px] font-bold text-white truncate">Developer Console</p>
+            <p className="text-[10px] text-white/50 truncate font-mono">{publicDevName(profile) || profile?.email || 'dev'}@nexastore</p>
+          </div>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden sm:inline text-[10px] font-mono text-emerald-400/90">● online</span>
+          <button type="button" onClick={() => setTab('publish')}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-500">
+            + Publish
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 flex min-h-0">
+        {/* Side rail */}
+        <nav className={`hidden sm:flex w-48 flex-col flex-shrink-0 border-r py-3 ${dark ? 'bg-[#0a0e1a] border-white/10' : 'bg-[#16161f] border-black/20'}`}>
           {tabs.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-[13px] font-semibold border-b-2 transition-colors whitespace-nowrap ${tab === id ? 'border-violet-500 text-violet-500' : `border-transparent ${subtext}`}`}>
+            <button key={id} type="button" onClick={() => setTab(id)}
+              className={`mx-2 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-semibold text-left transition-colors ${
+                tab === id ? 'bg-violet-600 text-white' : 'text-white/65 hover:bg-white/10 hover:text-white'
+              }`}>
               <Icon size={15} /> {label}
             </button>
           ))}
-        </div>
-      </div>
+        </nav>
 
-      <div className="max-w-3xl mx-auto px-4 md:px-8 py-6">
-        {tab === 'overview' && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: 'Total apps', value: myApps.length, color: 'text-violet-500' },
-                { label: 'Live', value: statusCounts.approved, color: 'text-emerald-500' },
-                { label: 'Pending', value: statusCounts.pending, color: 'text-amber-500' },
-                { label: 'Rejected', value: statusCounts.rejected, color: 'text-red-500' },
-              ].map(s => (
-                <div key={s.label} className={`rounded-2xl border p-4 ${card}`}>
-                  <p className={`text-[11.5px] font-semibold uppercase tracking-wide ${subtext}`}>{s.label}</p>
-                  <p className={`text-2xl font-extrabold mt-1 ${s.color}`}>{appsLoading ? '—' : s.value}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`font-bold text-[14px] ${text} mb-1`}>Apps by status</p>
-              <p className={`text-[11.5px] ${subtext} mb-3`}>Live counts from your apps in the database — not sample data.</p>
-              {appsLoading ? (
-                <p className={`text-[13px] ${subtext} py-10 text-center`}>Loading chart…</p>
-              ) : myApps.length === 0 ? (
-                <div className="text-center py-10">
-                  <p className={`text-[13px] ${subtext} mb-3`}>No apps yet — publish your first one.</p>
-                  <button onClick={() => setTab('publish')} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-4 py-2 rounded-xl font-semibold text-[13px]">Publish an app</button>
-                </div>
-              ) : (
-                <div className="h-56 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
-                      <XAxis dataKey="name" tick={{ fill: dark ? '#94a3b8' : '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis allowDecimals={false} tick={{ fill: dark ? '#94a3b8' : '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff', color: dark ? '#fff' : '#111' }} />
-                      <Bar dataKey="value" radius={[8, 8, 4, 4]}>
-                        {chartData.map((entry, idx) => (
-                          <Cell key={idx} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </div>
-
-            <button onClick={() => setTab('publish')} className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 flex items-center justify-center gap-2">
-              <Upload size={16} /> Publish a new app
-            </button>
+        {/* Center dashboard */}
+        <main className="flex-1 overflow-auto">
+          {/* Mobile tab strip */}
+          <div className={`sm:hidden flex gap-1 overflow-x-auto px-3 py-2 border-b ${dark ? 'border-white/10 bg-[#0c1020]' : 'border-gray-200 bg-white'}`}>
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button key={id} type="button" onClick={() => setTab(id)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
+                  tab === id ? 'bg-violet-600 text-white' : dark ? 'bg-white/10 text-white/70' : 'bg-gray-100 text-gray-600'
+                }`}>
+                <Icon size={12} /> {label}
+              </button>
+            ))}
           </div>
-        )}
 
-        {tab === 'earnings' && (
-          <div className="space-y-4">
-            <div className={`rounded-2xl border p-5 ${card}`}>
-              <p className={`text-[12px] font-semibold uppercase tracking-wide ${subtext}`}>Total earned</p>
-              <p className={`text-[28px] font-extrabold mt-1 ${text}`}>{totalEarned.toFixed(2)} <span className="text-[16px] text-emerald-500">USDT</span></p>
-              <p className={`text-[12.5px] mt-1 ${subtext}`}>{sales.length} completed sale{sales.length === 1 ? '' : 's'} (from database purchases)</p>
-            </div>
-            <div className={`rounded-2xl border p-4 ${card}`}>
-              <p className={`font-bold text-[14px] ${text} mb-3`}>Earnings over time</p>
-              {sales.length === 0 ? (
-                <p className={`text-[13px] ${subtext} py-8 text-center`}>No sales yet — figures come from real purchases only.</p>
-              ) : (
-                <div className="h-56 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={earnings}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
-                      <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
-                      <Tooltip contentStyle={{ borderRadius: 12, border: 'none', background: dark ? '#12172f' : '#fff' }} formatter={(v) => [`${Number(v).toFixed(2)} USDT`, 'Earned']} />
-                      <Bar dataKey="amount" fill="#10b981" radius={[8, 8, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+          <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
+            {tab === 'overview' && (
+              <>
+                <div>
+                  <h1 className={`text-[20px] font-extrabold ${text}`}>Dashboard</h1>
+                  <p className={`text-[13px] ${subtext}`}>All apps, sales, and listing health in one place</p>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Apps', value: myApps.length, color: 'text-violet-500' },
+                    { label: 'Approved', value: statusCounts.approved, color: 'text-emerald-500' },
+                    { label: 'Pending', value: statusCounts.pending, color: 'text-amber-500' },
+                    { label: 'Earned', value: `${totalEarned.toFixed(2)} USDT`, color: 'text-emerald-500' },
+                  ].map((s) => (
+                    <div key={s.label} className={`rounded-2xl border p-4 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                      <p className={`text-[11px] font-bold uppercase tracking-wide ${subtext}`}>{s.label}</p>
+                      <p className={`text-[22px] font-extrabold mt-1 ${s.color}`}>{s.value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className={`rounded-2xl border p-4 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <p className={`font-bold text-[14px] mb-3 ${text}`}>Status mix</p>
+                  {myApps.length === 0 ? (
+                    <p className={`text-[13px] py-8 text-center ${subtext}`}>No apps yet — publish your first listing</p>
+                  ) : (
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <Tooltip />
+                          <Bar dataKey="value" radius={[8, 8, 4, 4]}>
+                            {chartData.map((entry, idx) => (
+                              <Cell key={idx} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+                <div className={`rounded-2xl border overflow-hidden ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <div className="px-4 py-3 flex items-center justify-between border-b border-inherit">
+                    <p className={`font-bold text-[14px] ${text}`}>Your apps</p>
+                    <button type="button" onClick={() => setTab('apps')} className="text-[12px] font-bold text-violet-500">View all</button>
+                  </div>
+                  {appsLoading ? (
+                    <p className={`text-[13px] p-6 text-center ${subtext}`}>Loading…</p>
+                  ) : myApps.length === 0 ? (
+                    <div className="p-6 text-center">
+                      <p className={`text-[13px] ${subtext} mb-3`}>Nothing published yet</p>
+                      <button type="button" onClick={() => setTab('publish')} className="px-4 py-2 rounded-xl text-[12px] font-bold text-white bg-violet-600">Publish an app</button>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {myApps.slice(0, 6).map((app) => (
+                        <div key={app.id} className="px-4 py-3 flex items-center gap-3">
+                          {app.logo_url ? (
+                            <img src={app.logo_url} alt="" className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className={`font-bold text-[13.5px] truncate ${text}`}>{app.name}</p>
+                              {statusBadge(app.status)}
+                            </div>
+                            <p className={`text-[11.5px] ${subtext}`}>{formatPrice(app.price)} · v{app.version || '1.0.0'} · {app.category}</p>
+                          </div>
+                          <button type="button" onClick={() => startEdit(app)}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-800'}`}>
+                            Edit
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
-        {tab === 'wallet' && (
-          <div className={`rounded-2xl border p-5 space-y-3 ${card}`}>
-            <div className="flex items-center gap-2">
-              <Wallet size={18} className="text-emerald-500" />
-              <p className={`font-bold text-[15px] ${text}`}>Payout wallet</p>
-            </div>
-            <p className={`text-[13px] ${subtext}`}>
-              Buyers send USDT <span className="font-semibold">directly to your wallet</span>. NexaStore does not hold your funds. Platform address is only a fallback if this is empty.
-            </p>
-            <input type="text" value={payoutWallet} onChange={(e) => setPayoutWallet(e.target.value)} placeholder="0x… Polygon USDT address" className={inputCls} />
-            <button type="button" disabled={walletSaving} onClick={savePayoutWallet} className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-3 rounded-xl font-bold text-[14px] disabled:opacity-50">
-              {walletSaving ? 'Saving…' : 'Save payout wallet'}
-            </button>
-            {walletMsg && <p className="text-[12.5px] font-medium text-emerald-500">{walletMsg}</p>}
-          </div>
-        )}
-
-        {tab === 'publish' && (
-          <form onSubmit={handleSubmit} className="space-y-3.5">
-            <input type="text" placeholder="App name" value={formData.name} onChange={set('name')} className={inputCls} />
-            <input type="text" placeholder="Tagline (short, one line)" value={formData.tagline} onChange={set('tagline')} className={inputCls} />
-            <textarea placeholder="Description" value={formData.description} onChange={set('description')} className={`${inputCls} h-24 resize-none`} />
-
-            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
-              <select value={formData.category} onChange={set('category')} className={inputCls}>
-                {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <div className="relative">
-                <input type="number" min="0" step="0.01" placeholder="0.00 = free" value={formData.price} onChange={set('price')} className={`${inputCls} pr-14`} />
-                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-bold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>USDT</span>
-              </div>
-            </div>
-            <p className={`text-[11.5px] -mt-1 ${subtext}`}>Set a USDT price to enable a paywall. Buyers pay once, then can install forever.</p>
-
-            <div className="grid grid-cols-3 gap-x-3 gap-y-5">
-              <input type="text" placeholder="Version (e.g. 1.0.0)" value={formData.version} onChange={set('version')} className={inputCls} />
-              <input type="text" placeholder="Release notes" value={formData.releaseNotes} onChange={set('releaseNotes')} className={inputCls} />
-            </div>
-
-            <FileDropField label="App file" hint="APK, ZIP, or EXE" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setAppFile(e.target.files?.[0] || null)} files={appFile} dark={dark} />
-            <FileDropField label="App icon / logo" hint="Square image, PNG or JPG — required" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
-            <FileDropField label="Screenshots" hint="At least 3 images — required" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
-
-            {error && <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[13px] font-medium leading-snug">{error}</p>}
-            {success && <p className="text-emerald-500 text-[13px] font-medium">{success}</p>}
-            {step && !error && <p className="text-violet-500 text-[13px] font-medium">{step}</p>}
-
-            <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 text-[14px]">
-              {loading ? 'Submitting…' : 'Submit for review'}
-            </button>
-          </form>
-        )}
-
-        {tab === 'apps' && (
-          <div className="space-y-3">
-            {appsLoading && <p className={`text-center py-10 text-[13px] ${subtext}`}>Loading your apps…</p>}
-            {!appsLoading && myApps.length === 0 && (
-              <div className={`rounded-2xl border p-8 text-center ${card}`}>
-                <p className={`font-bold ${text} mb-1`}>No published apps yet</p>
-                <p className={`text-[13px] ${subtext} mb-4`}>Upload your first app from the Publish tab.</p>
-                <button onClick={() => setTab('publish')} className="bg-gradient-to-r from-blue-600 to-violet-600 text-white px-4 py-2 rounded-xl font-semibold text-[13px]">Go to Publish</button>
+            {tab === 'earnings' && (
+              <div className="space-y-4">
+                <div>
+                  <h1 className={`text-[20px] font-extrabold ${text}`}>Earnings</h1>
+                  <p className={`text-[13px] ${subtext}`}>Confirmed sales credited to your apps</p>
+                </div>
+                <div className={`rounded-2xl border p-5 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <p className={`text-[12px] font-semibold uppercase tracking-wide ${subtext}`}>Total earned</p>
+                  <p className={`text-[28px] font-extrabold mt-1 ${text}`}>{totalEarned.toFixed(2)} <span className="text-[16px] text-emerald-500">USDT</span></p>
+                  <p className={`text-[12.5px] mt-1 ${subtext}`}>{sales.length} completed sale{sales.length === 1 ? '' : 's'}</p>
+                </div>
+                <div className={`rounded-2xl border p-4 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <p className={`font-bold text-[14px] ${text} mb-3`}>Over time</p>
+                  {sales.length === 0 ? (
+                    <p className={`text-[13px] ${subtext} py-8 text-center`}>No sales yet</p>
+                  ) : (
+                    <div className="h-56 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={earnings}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} />
+                          <XAxis dataKey="day" tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <YAxis tick={{ fontSize: 10, fill: dark ? '#94a3b8' : '#6b7280' }} />
+                          <Tooltip />
+                          <Bar dataKey="amount" fill="#10b981" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-            {myApps.map(app => (
-              <div key={app.id} className={`rounded-2xl border p-4 ${card}`}>
-                {editingApp?.id === app.id ? (
-                  <div className="space-y-2.5">
-                    <input className={inputCls} value={editForm.name} onChange={setEdit('name')} placeholder="Name" />
-                    <input className={inputCls} value={editForm.tagline} onChange={setEdit('tagline')} placeholder="Tagline" />
-                    <textarea className={`${inputCls} h-20 resize-none`} value={editForm.description} onChange={setEdit('description')} placeholder="Description" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <select className={inputCls} value={editForm.category} onChange={setEdit('category')}>
-                        {Object.keys(categoryIconMap).map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <div className="relative">
-                        <input type="number" min="0" step="0.01" className={`${inputCls} pr-14`} value={editForm.price} onChange={setEdit('price')} />
-                        <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-bold ${dark ? 'text-emerald-400' : 'text-emerald-600'}`}>USDT</span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className={inputCls} value={editForm.version} onChange={setEdit('version')} placeholder="Version" />
-                      <input className={inputCls} value={editForm.releaseNotes} onChange={setEdit('releaseNotes')} placeholder="Release notes" />
-                    </div>
-                    <p className={`text-[12px] font-semibold ${text}`}>Optional media (only what you change is replaced)</p>
-                    <FileDropField label="App icon / logo" hint="Square PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)} files={editLogoFile} dark={dark} />
-                    <div className={`rounded-xl border p-3 space-y-2 ${dark ? 'border-white/10' : 'border-gray-200'}`}>
-                      <p className={`text-[12px] font-bold ${text}`}>Screenshots — replace one at a time</p>
-                      <p className={`text-[11px] ${subtext}`}>Pick a new image for a slot to replace only that screenshot. Empty slots stay as they are.</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {editSsSlots.map((slot, si) => (
-                          <label key={slot.index} className={`relative aspect-[9/16] max-h-36 rounded-lg overflow-hidden border cursor-pointer ${dark ? 'border-white/15 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
-                            {(slot.file || slot.url) ? (
-                              <img
-                                src={slot.file ? URL.createObjectURL(slot.file) : slot.url}
-                                alt={`Screenshot ${slot.index + 1}`}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${subtext}`}>Slot {slot.index + 1}</span>
-                            )}
-                            <span className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-bold text-white bg-black/50 rounded py-0.5">
-                              {slot.file ? 'New' : 'Replace'}
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0] || null;
-                                setEditSsSlots((prev) => prev.map((s, j) => (j === si ? { ...s, file: f } : s)));
-                              }}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setEditSsSlots((prev) => [...prev, { index: prev.length, url: null, file: null }])}
-                        className={`text-[12px] font-semibold ${dark ? 'text-violet-300' : 'text-violet-600'}`}
-                      >
-                        + Add screenshot slot
-                      </button>
-                    </div>
-                    <FileDropField label="App file" hint="New APK / ZIP / EXE (optional)" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setEditAppFile(e.target.files?.[0] || null)} files={editAppFile} dark={dark} />
-                    <div className="flex gap-2 pt-1">
-                      <button type="button" onClick={() => { setEditingApp(null); setEditLogoFile(null); setEditScreenshots([]); setEditSsSlots([]); setEditAppFile(null); }} className={`flex-1 py-2.5 rounded-xl font-semibold text-[13px] ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>Cancel</button>
-                      <button type="button" onClick={saveEdit} disabled={editSaving} className="flex-1 py-2.5 rounded-xl font-bold text-[13px] text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">{editSaving ? 'Saving…' : 'Save changes'}</button>
-                    </div>
+
+            {tab === 'wallet' && (
+              <div className="space-y-4 max-w-lg">
+                <div>
+                  <h1 className={`text-[20px] font-extrabold ${text}`}>Payout wallet</h1>
+                  <p className={`text-[13px] ${subtext}`}>USDT on Polygon is sent to this address when buyers pay</p>
+                </div>
+                <div className={`rounded-2xl border p-4 space-y-3 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <label className={`text-[12px] font-semibold ${subtext}`}>Polygon USDT address</label>
+                  <input className={inputCls} value={payoutWallet} onChange={(e) => setPayoutWallet(e.target.value)} placeholder="0x…" />
+                  {walletMsg && <p className={`text-[12px] ${subtext}`}>{walletMsg}</p>}
+                  <button type="button" disabled={walletSaving} onClick={savePayoutWallet}
+                    className="w-full py-3 rounded-xl font-bold text-[13px] text-white bg-emerald-600 disabled:opacity-50">
+                    {walletSaving ? 'Saving…' : 'Save wallet'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === 'publish' && (
+              <div className="space-y-4 max-w-xl">
+                <div>
+                  <h1 className={`text-[20px] font-extrabold ${text}`}>Publish app</h1>
+                  <p className={`text-[13px] ${subtext}`}>Submit a new listing for review</p>
+                </div>
+                {error && (
+                  <div className={`rounded-xl border px-3 py-2.5 text-[12.5px] ${dark ? 'bg-amber-500/10 border-amber-500/25 text-amber-100' : 'bg-amber-50 border-amber-100 text-amber-900'}`}>
+                    <p className="font-semibold">{error}</p>
+                  </div>
+                )}
+                {success && <p className="text-emerald-600 text-[13px] font-semibold">{success}</p>}
+                {step && !error && <p className="text-violet-500 text-[13px] font-medium">{step}</p>}
+                <div className={`rounded-2xl border p-4 space-y-3 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                  <input className={inputCls} value={formData.name} onChange={set('name')} placeholder="App name *" />
+                  <input className={inputCls} value={formData.tagline} onChange={set('tagline')} placeholder="Tagline *" />
+                  <textarea className={`${inputCls} min-h-[88px]`} value={formData.description} onChange={set('description')} placeholder="Description *" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select className={inputCls} value={formData.category} onChange={set('category')}>
+                      {Object.keys(categoryIconMap).map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <input className={inputCls} value={formData.price} onChange={set('price')} placeholder="Price USDT" inputMode="decimal" />
+                    <input className={inputCls} value={formData.version} onChange={set('version')} placeholder="Version" />
+                    <input className={inputCls} value={formData.releaseNotes} onChange={set('releaseNotes')} placeholder="Release notes" />
+                  </div>
+                  <FileDropField label="Logo *" hint="Square PNG or JPG" icon={ImageIcon} accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} files={logoFile} dark={dark} />
+                  <FileDropField label="Screenshots * (3+)" hint="PNG or JPG" icon={ImageIcon} accept="image/*" multiple onChange={(e) => setScreenshots(Array.from(e.target.files || []))} files={screenshots} dark={dark} />
+                  <FileDropField label="App file *" hint="APK / ZIP / EXE" icon={FileArchive} accept=".apk,.zip,.exe,.aab,.dmg" onChange={(e) => setAppFile(e.target.files?.[0] || null)} files={appFile} dark={dark} />
+                  <button type="button" disabled={loading} onClick={(e) => handleSubmit(e || { preventDefault() {} })}
+                    className="w-full py-3 rounded-xl font-bold text-[14px] text-white bg-gradient-to-r from-blue-600 to-violet-600 disabled:opacity-50">
+                    {loading ? 'Publishing…' : 'Submit for review'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === 'apps' && (
+              <div className="space-y-4">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h1 className={`text-[20px] font-extrabold ${text}`}>My apps</h1>
+                    <p className={`text-[13px] ${subtext}`}>Open any listing for the full edit screen</p>
+                  </div>
+                  <button type="button" onClick={() => setTab('publish')} className="px-3 py-2 rounded-xl text-[12px] font-bold text-white bg-violet-600">+ New</button>
+                </div>
+                {appsLoading ? (
+                  <p className={`text-[13px] py-10 text-center ${subtext}`}>Loading…</p>
+                ) : myApps.length === 0 ? (
+                  <div className={`rounded-2xl border p-8 text-center ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200'}`}>
+                    <p className={`text-[13px] ${subtext} mb-3`}>No apps yet</p>
+                    <button type="button" onClick={() => setTab('publish')} className="px-4 py-2 rounded-xl text-[12px] font-bold text-white bg-violet-600">Publish</button>
                   </div>
                 ) : (
-                  <div className="flex items-start gap-3">
-                    {app.logo_url ? (
-                      <img src={app.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`font-bold text-[14px] truncate ${text}`}>{app.name}</p>
-                        {statusBadge(app.status)}
+                  <div className="space-y-3">
+                    {myApps.map((app) => (
+                      <div key={app.id} className={`rounded-2xl border p-4 flex items-start gap-3 ${dark ? 'bg-[#0c1020] border-white/10' : 'bg-white border-gray-200 shadow-sm'}`}>
+                        {app.logo_url ? (
+                          <img src={app.logo_url} alt="" className="w-14 h-14 rounded-2xl object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className={`font-bold text-[15px] ${text}`}>{app.name}</p>
+                            {statusBadge(app.status)}
+                          </div>
+                          <p className={`text-[12.5px] mt-0.5 ${subtext} line-clamp-2`}>{app.tagline || app.description}</p>
+                          <p className={`text-[12px] mt-1 font-semibold ${(parseFloat(app.price) || 0) > 0 ? 'text-emerald-500' : subtext}`}>
+                            {formatPrice(app.price)} · v{app.version || '1.0.0'} · {app.category || '—'}
+                          </p>
+                        </div>
+                        <button type="button" onClick={() => startEdit(app)}
+                          className="px-3 py-2 rounded-xl text-[12px] font-bold text-white bg-violet-600 flex-shrink-0">
+                          Edit
+                        </button>
                       </div>
-                      <p className={`text-[12px] ${subtext} truncate`}>{app.tagline || app.category}</p>
-                      <p className={`text-[12px] mt-0.5 font-semibold ${(parseFloat(app.price) || 0) > 0 ? 'text-emerald-500' : subtext}`}>
-                        {formatPrice(app.price)} · v{app.version || '1.0.0'}
-                      </p>
-                    </div>
-                    <button type="button" onClick={() => startEdit(app)} className={`p-2 rounded-lg flex-shrink-0 ${dark ? 'hover:bg-white/10 text-white' : 'hover:bg-gray-100 text-gray-700'}`} title="Edit">
-                      <Pencil size={16} />
-                    </button>
+                    ))}
                   </div>
                 )}
               </div>
-            ))}
+            )}
           </div>
-        )}
+        </main>
       </div>
     </div>
   );
@@ -6818,12 +6911,11 @@ function NexaStore() {
     if (canNotify) {
       showDownloadNotification(
         `Downloading ${app.name}`,
-        'Keep this tab open — download continues in the background until the browser is closed.',
+        'Keep this tab open until the download finishes.',
         `dl-${app.id}`
       );
-    } else {
-      showToast(`Downloading ${app.name}… Keep this tab open until it finishes.`, 'info', 5000);
     }
+    // Progress stays on the phone notification / tab title — not an in-app banner
     try {
       const bits = await sbSelect('app_bits', `app_id=eq.${app.id}&select=*&order=bit_index`, session);
       if (!bits.length) {
@@ -6975,6 +7067,38 @@ function NexaStore() {
   };
   void ownedTick;
 
+  const pathName = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const isKnownPath =
+    pathName === '/' ||
+    pathName === '' ||
+    /^\/affiliates\/?$/i.test(pathName) ||
+    /^\/(about|payments|terms|privacy|contact|studio|app|tutorials)(\/|$)/i.test(pathName) ||
+    pathName.startsWith('/index') ||
+    pathName.endsWith('.html') ||
+    pathName.endsWith('.txt') ||
+    pathName.endsWith('.xml') ||
+    pathName.endsWith('.json') ||
+    pathName.endsWith('.png') ||
+    pathName.endsWith('.svg') ||
+    pathName.endsWith('.ico');
+  // Soft in-app 404 for unknown SPA paths (static 404.html still used by host for hard 404s)
+  if (typeof window !== 'undefined' && !isKnownPath && !pathName.match(/^\/?$/)) {
+    return (
+      <div className="min-h-screen bg-[#f8f9fa] flex items-center justify-center p-6" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div className="max-w-md w-full text-center bg-white border border-gray-200 rounded-3xl p-8 shadow-sm">
+          <p className="text-5xl font-extrabold bg-gradient-to-r from-violet-600 to-emerald-600 bg-clip-text text-transparent">404</p>
+          <h1 className="text-[18px] font-extrabold text-gray-900 mt-3">This page doesn’t exist</h1>
+          <p className="text-[13.5px] text-gray-500 mt-2 leading-relaxed">
+            The link may be broken or outdated. Return to the store to keep browsing.
+          </p>
+          <a href="/" className="inline-flex mt-6 px-5 py-2.5 rounded-full bg-emerald-600 text-white text-[13.5px] font-bold">
+            Back to NexaStore
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   const isAffiliatePath = typeof window !== 'undefined' && (
     /^\/affiliates\/?$/i.test(window.location.pathname)
     || window.location.search.includes('portal=affiliate')
@@ -7094,7 +7218,6 @@ function NexaStore() {
           </div>
         </div>
       )}
-      <DownloadProgressBanner installState={installState} />
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
