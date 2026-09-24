@@ -9,6 +9,81 @@ const STORAGEAPI = `${SUPABASE_URL}/storage/v1`;
 const AUTHAPI = `${SUPABASE_URL}/auth/v1`;
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcHN3dHJpd294bHNjamRha3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDM4MDEsImV4cCI6MjEwMTE3OTgwMX0.jkQtVSMwjzkB9NI1txeuk-RTCrxAJX_RXEyNqcdoewY";
 
+const THEME_KEY = 'nexastore_theme_v1';
+const ONBOARD_KEY = 'nexastore_onboarded_v1';
+
+function loadTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === 'dark' || v === 'light') return v;
+  } catch {}
+  return 'light';
+}
+
+function saveTheme(mode) {
+  try { localStorage.setItem(THEME_KEY, mode === 'dark' ? 'dark' : 'light'); } catch {}
+}
+
+function hasCompletedOnboarding(userId) {
+  try {
+    const raw = localStorage.getItem(ONBOARD_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    if (userId && obj[userId]) return true;
+    if (obj.__guest) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function markOnboardingDone(userId) {
+  try {
+    const raw = localStorage.getItem(ONBOARD_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    if (userId) obj[userId] = true;
+    else obj.__guest = true;
+    localStorage.setItem(ONBOARD_KEY, JSON.stringify(obj));
+  } catch {}
+}
+
+/** Soft dark surfaces — gradient navy, not pure black */
+function themeTokens(dark) {
+  if (dark) {
+    return {
+      dark: true,
+      pageBg: 'bg-gradient-to-b from-[#0c1222] via-[#101828] to-[#0a101c]',
+      pageBgStyle: { backgroundImage: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99,102,241,0.12), transparent 55%), linear-gradient(180deg, #0c1222 0%, #101828 45%, #0a101c 100%)' },
+      shell: 'bg-[#101828]/90',
+      text: 'text-slate-100',
+      subtext: 'text-slate-400',
+      card: 'bg-white/[0.06] border-white/10',
+      border: 'border-white/10',
+      chip: 'bg-white/10 text-slate-200',
+      input: 'bg-white/5 border-white/10 text-slate-100 placeholder-slate-500',
+      nav: 'bg-[#0e1526]/95 border-white/10',
+      accent: 'text-emerald-400',
+      btn: 'bg-emerald-600 hover:bg-emerald-500 text-white',
+    };
+  }
+  return {
+    dark: false,
+    pageBg: 'bg-[#f8f9fa]',
+    pageBgStyle: {},
+    shell: 'bg-white',
+    text: 'text-gray-900',
+    subtext: 'text-gray-500',
+    card: 'bg-white border-gray-100',
+    border: 'border-gray-100',
+    chip: 'bg-gray-100 text-gray-700',
+    input: 'bg-white border-gray-200 text-gray-900 placeholder-gray-400',
+    nav: 'bg-white/95 border-gray-200',
+    accent: 'text-emerald-700',
+    btn: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+  };
+}
+
+
+
 async function sbSelect(table, qs, token) {
   const url = `${REST}/${table}?${qs}`;
   const opts = {
@@ -3288,7 +3363,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
             <img src="/branding/nexapulse-seal.png" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
           )}
           <div className="min-w-0">
-            <p className={`font-bold text-[15px] ${portal ? 'text-white' : text}`}>Affiliate program</p>
+            <p className={`font-bold text-[15px] ${portal ? 'text-white' : text}`}>Partners</p>
             <p className={`text-[11.5px] ${portal ? 'text-zinc-400' : subtext}`}>Apply · wait for approval · then codes &amp; earnings</p>
           </div>
         </div>
@@ -3506,7 +3581,7 @@ function AffiliateDashboard({ session, profile, onClose, dark, showToast, paidAp
   );
 }
 
-function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenAffiliateAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, onOpenAffiliate, dark }) {
+function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWallet, onOpenAdmin, onOpenDeveloper, onOpenTutorials, onOpenTutorial, onSignOut, onOpenAuth, onProfileUpdated, dark, onToggleTheme }) {
   const purchases = profile ? (getPurchases()[profile.id] || []) : [];
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarErr, setAvatarErr] = useState('');
@@ -3764,26 +3839,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
             <ChevronRight size={17} className={subtext} />
           </button>
         )}
-        {profile.is_owner && onOpenAffiliateAdmin && (
-          <button type="button" onClick={onOpenAffiliateAdmin}
-            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
-            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
-              <DollarSign size={18} className="text-emerald-500" /> Affiliate Admin
-            </span>
-            <ChevronRight size={17} className={subtext} />
-          </button>
-        )}
-        {!profile.is_owner && onOpenAffiliate && (
-          <button type="button" onClick={onOpenAffiliate}
-            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card} hover:opacity-90`}>
-            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
-              <DollarSign size={18} className="text-emerald-500" /> Affiliate program
-            </span>
-            <ChevronRight size={17} className={subtext} />
-          </button>
-        )}
-
-        <div className={`rounded-2xl border p-4 ${card}`}>
+<div className={`rounded-2xl border p-4 ${card}`}>
           <p className={`text-[12px] font-bold uppercase tracking-wider mb-2 ${subtext}`}>Trust &amp; policies</p>
           <div className="flex flex-wrap gap-2">
             {[
@@ -3792,8 +3848,7 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
               ['Terms', '/terms/'],
               ['Privacy', '/privacy/'],
               ['Contact', '/contact/'],
-              ['Affiliate program', '/affiliates/'],
-            ].map(([label, href]) => (
+                          ].map(([label, href]) => (
               <a key={href} href={href} target="_blank" rel="noopener noreferrer"
                 className={`text-[12px] font-semibold px-2.5 py-1.5 rounded-lg ${dark ? 'bg-white/10 text-slate-200' : 'bg-white border border-gray-200 text-gray-700'}`}>
                 {label}
@@ -3802,6 +3857,17 @@ function ProfileView({ session, profile, wallet, onConnectWallet, onDisconnectWa
           </div>
         </div>
 
+        {onToggleTheme && (
+          <div className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${card}`}>
+            <span className={`flex items-center gap-3 font-semibold text-[14px] ${text}`}>
+              <Eye size={18} className="text-violet-500" /> Appearance
+            </span>
+            <div className="flex rounded-full overflow-hidden border border-gray-200/20 text-[11px] font-bold">
+              <button type="button" onClick={() => onToggleTheme('light')} className={`px-3 py-1 ${!dark ? 'bg-violet-600 text-white' : 'text-slate-400'}`}>Light</button>
+              <button type="button" onClick={() => onToggleTheme('dark')} className={`px-3 py-1 ${dark ? 'bg-violet-600 text-white' : 'text-slate-400'}`}>Dark</button>
+            </div>
+          </div>
+        )}
         <button onClick={onSignOut}
           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border ${dark ? 'border-red-500/30 bg-red-500/10' : 'border-red-100 bg-red-50'} hover:opacity-90`}>
           <span className="flex items-center gap-3 font-semibold text-[14px] text-red-500">
@@ -5852,13 +5918,13 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, onOpenAffiliateAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
+function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
   const [downloadApps, setDownloadApps] = useState(() => resolveDownloadApps(filteredApps));
   useEffect(() => {
     setDownloadApps(resolveDownloadApps(filteredApps));
   }, [filteredApps, view, installState?.status]);
 
-  const dark = false;
+  /* theme from props */ ;
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [wishlistApps, setWishlistApps] = useState([]);
@@ -6071,9 +6137,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                 <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Profile</h2>
                 <ProfileView
                   onProfileUpdated={onProfileUpdated}
-                  onOpenAffiliate={onOpenAffiliate}
-                  onOpenAffiliateAdmin={onOpenAffiliateAdmin}
-                  session={session}
+                                                      session={session}
                   profile={profile}
                   wallet={wallet}
                   onConnectWallet={onConnectWallet}
@@ -6158,7 +6222,7 @@ function MobileCategoryChip({ name, icon: Icon, count, bg, color }) {
   );
 }
 
-function MobileBottomNav({ view, setView }) {
+function MobileBottomNav({ view, setView, dark = false }) {
   const tabs = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'charts', label: 'Charts', icon: TrendingUp },
@@ -6168,7 +6232,7 @@ function MobileBottomNav({ view, setView }) {
   const libraryDetailViews = ['myapps', 'installed', 'downloads', 'wishlist'];
   const activeTab = libraryDetailViews.includes(view) ? 'library' : view;
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 md:hidden bg-white/95 backdrop-blur-md border-t border-gray-200">
+    <nav className={`fixed bottom-0 inset-x-0 z-30 md:hidden backdrop-blur-md border-t ${dark ? "bg-[#0e1526]/95 border-white/10" : "bg-white/95 border-gray-200"}`}>
       <div className="flex items-stretch max-w-lg mx-auto">
         {tabs.map(({ id, label, icon: Icon }) => {
           const on = activeTab === id;
@@ -6176,7 +6240,7 @@ function MobileBottomNav({ view, setView }) {
             <button key={id} type="button" onClick={() => setView(id)}
               className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative">
               {on && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-0.5 rounded-full bg-emerald-600" />}
-              <Icon size={22} strokeWidth={on ? 2.4 : 2} className={on ? 'text-emerald-700' : 'text-gray-500'} />
+              <Icon size={22} strokeWidth={on ? 2.4 : 2} className={on ? 'text-emerald-500' : (dark ? 'text-slate-500' : 'text-gray-500')} />
               <span className={`text-[10px] font-semibold ${on ? 'text-emerald-700' : 'text-gray-500'}`}>{label}</span>
             </button>
           );
@@ -6186,8 +6250,7 @@ function MobileBottomNav({ view, setView }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, onOpenAffiliateAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, onOpenAffiliate }) {
-  const dark = false;
+function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -6254,10 +6317,10 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
   }, [view, session, profile?.id, filteredApps]);
 
   return (
-    <div className="md:hidden min-h-screen w-full bg-[#f8f9fa] text-gray-900 pb-24">
+    <div className={`md:hidden min-h-screen w-full pb-24 ${dark ? "text-slate-100" : "text-gray-900"}`} style={dark ? { backgroundImage: "radial-gradient(ellipse 90% 40% at 50% -10%, rgba(99,102,241,0.14), transparent 50%), linear-gradient(180deg, #0c1222 0%, #101828 40%, #0a101c 100%)" } : { background: "#f8f9fa" }}>
       {view !== 'profile' && (
-        <div className="sticky top-0 z-20 px-3 pt-3 pb-2 bg-[#f8f9fa]/95 backdrop-blur-md">
-          <div className="flex items-center gap-2 bg-white rounded-full shadow-sm border border-gray-200 px-3 py-2">
+        <div className={`sticky top-0 z-20 px-3 pt-3 pb-2 backdrop-blur-md ${dark ? "bg-[#0c1222]/90" : "bg-[#f8f9fa]/95"}`}>
+          <div className={`flex items-center gap-2 rounded-full shadow-sm border px-3 py-2 ${dark ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
             <NexaLogo size={26} />
             <input
               type="text"
@@ -6505,9 +6568,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
           <div className="px-4 pt-4">
             <ProfileView
               onProfileUpdated={onProfileUpdated}
-              onOpenAffiliate={onOpenAffiliate}
-              onOpenAffiliateAdmin={onOpenAffiliateAdmin}
-              session={session}
+                                          session={session}
               profile={profile}
               wallet={wallet}
               onConnectWallet={onConnectWallet}
@@ -6518,7 +6579,8 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               onOpenTutorial={onOpenTutorial}
               onSignOut={onSignOut}
               onOpenAuth={onOpenAuth}
-              dark={false}
+              dark={dark}
+              onToggleTheme={setTheme}
             />
           </div>
         </div>
@@ -6594,7 +6656,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
       {!loading && filteredApps.length === 0 && !libraryDetailViews.includes(view) && view !== 'library' && view !== 'profile' && <p className="text-center py-10 text-gray-500 text-sm">No apps found</p>}
 
       <div className="h-20" />
-      <MobileBottomNav view={view} setView={setView} />
+      <MobileBottomNav view={view} setView={setView} dark={dark} />
     </div>
   );
 }
@@ -6751,6 +6813,9 @@ function NexaStore() {
 
   const [showAdmin, setShowAdmin] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [theme, setTheme] = useState(() => loadTheme());
+  const dark = theme === 'dark';
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [fatalError, setFatalError] = useState(null);
   const [installState, setInstallState] = useState(null);
   const [wallet, setWallet] = useState(() => getStoredWallet());
@@ -6842,7 +6907,12 @@ function NexaStore() {
               if (typeof linkVisitorIdToProfile === 'function') {
                 prof = await linkVisitorIdToProfile(prof, sess.access_token);
               }
-              if (!cancelled) setProfile(prof);
+              if (!cancelled) {
+                setProfile(prof);
+                if (user?.id && !hasCompletedOnboarding(user.id)) {
+                  setShowOnboarding(true);
+                }
+              }
             }
           } catch {}
         }
@@ -6858,6 +6928,15 @@ function NexaStore() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    saveTheme(theme);
+    try {
+      document.documentElement.dataset.theme = theme;
+      document.body.style.background = theme === 'dark' ? '#0a101c' : '#f8f9fa';
+      document.body.style.color = theme === 'dark' ? '#e2e8f0' : '#111';
+    } catch {}
+  }, [theme]);
 
   // Surface unexpected errors in-app (not as a red console wall for users)
   useEffect(() => {
@@ -7022,6 +7101,7 @@ function NexaStore() {
           prof = await linkVisitorIdToProfile(prof, token);
           setProfile(prof);
           showToast(`Signed in as ${user.email || 'user'}`, 'success');
+          if (!hasCompletedOnboarding(user.id)) setShowOnboarding(true);
         }
       }
     }).catch((e) => showToast(e.message || 'Could not load profile', 'error'));
@@ -7048,7 +7128,7 @@ function NexaStore() {
   };
 
   const shared = {
-    view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall,
+    view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, dark, theme, setTheme,
     categories, onOpenAuth: () => setShowAuthModal(true), onSignOut: handleSignOut, onOpenDeveloper: openDeveloper,
     onOpenApp: (app) => setSelectedApp(app), onOpenAdmin: () => setShowAdmin(true),
     installState, showToast, isOwned,
@@ -7061,9 +7141,7 @@ function NexaStore() {
     },
     onOpenTutorials: openTutorialHub,
     onProfileUpdated: setProfile,
-    onOpenAffiliate: () => { window.location.href = '/affiliates/'; },
-    onOpenAffiliateAdmin: () => setShowAffiliateAdmin(true),
-    onOpenTutorial: openTutorialById,
+            onOpenTutorial: openTutorialById,
   };
   void ownedTick;
 
@@ -7099,35 +7177,16 @@ function NexaStore() {
     );
   }
 
-  const isAffiliatePath = typeof window !== 'undefined' && (
-    /^\/affiliates\/?$/i.test(window.location.pathname)
-    || window.location.search.includes('portal=affiliate')
-    || window.location.hash === '#affiliate'
-  );
-  if (isAffiliatePath) {
-    return (
-      <AffiliatePortal
-        session={session}
-        profile={profile}
-        paidApps={(allApps || []).filter((a) => (parseFloat(a.price) || 0) > 0 && a.status === 'approved')}
-        showToast={showToast}
-        onSessionFromAuth={handleAuth}
-        onSignOut={handleSignOut}
-      />
-    );
+  // Affiliates removed — old /affiliates links go home
+  if (typeof window !== 'undefined' && (/^\/affiliates\/?$/i.test(window.location.pathname) || window.location.search.includes('portal=affiliate'))) {
+    try { window.history.replaceState({}, '', '/'); } catch {}
   }
 
   return (
-    <div style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ fontFamily: "'Inter', sans-serif", ...(dark ? { background: '#0a101c', minHeight: '100vh' } : {}) }}>
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
-      {showAffiliateDash && session && profile && !profile.is_owner && (
-        <AffiliateDashboard session={session} profile={profile} onClose={() => setShowAffiliateDash(false)} dark={false} showToast={showToast} paidApps={(allApps || []).filter((a) => (parseFloat(a.price) || 0) > 0 && a.status === 'approved')} />
-      )}
-      {showAffiliateAdmin && session && profile && profile.is_owner && (
-        <AffiliateAdminDashboard session={session} profile={profile} onClose={() => setShowAffiliateAdmin(false)} dark={false} showToast={showToast} />
-      )}
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
@@ -7218,10 +7277,124 @@ function NexaStore() {
           </div>
         </div>
       )}
+      {showOnboarding && (
+        <OnboardingModal
+          dark={dark}
+          userName={profile ? (profile.display_name || profile.email?.split('@')[0]) : ''}
+          onThemeChange={(mode) => setTheme(mode)}
+          onDone={(mode) => {
+            if (mode) setTheme(mode);
+            markOnboardingDone(profile?.id);
+            setShowOnboarding(false);
+          }}
+        />
+      )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
+
+
+function OnboardingModal({ dark, onThemeChange, onDone, userName }) {
+  const [step, setStep] = useState(0);
+  const [pick, setPick] = useState(dark ? 'dark' : 'light');
+  const steps = [
+    {
+      title: 'Welcome to NexaStore',
+      body: userName
+        ? `Hi ${userName} — here’s a quick tour so you know where everything lives.`
+        : 'Here’s a quick tour so you know where everything lives.',
+    },
+    {
+      title: 'Home & Discover',
+      body: 'Browse featured apps, charts, and categories. Tap any app for details, screenshots, and install or buy with USDT.',
+    },
+    {
+      title: 'Library',
+      body: 'Downloads, wishlist, and apps you own show up under Library. Re-download anytime from there.',
+    },
+    {
+      title: 'Profile',
+      body: 'Manage your account, wallet for payments, tutorials, support, and the Developer Console if you publish apps.',
+    },
+    {
+      title: 'Choose your look',
+      body: 'Pick light or dark. You can change this later from Profile.',
+      theme: true,
+    },
+  ];
+  const s = steps[step];
+  const isLast = step === steps.length - 1;
+
+  return (
+    <div className="fixed inset-0 z-[320] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${dark ? 'bg-[#121a2e] border border-white/10' : 'bg-white border border-gray-200'}`}>
+        <div className="px-5 pt-5 pb-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-violet-500">Getting started · {step + 1}/{steps.length}</p>
+          <h2 className={`text-[18px] font-extrabold mt-1 ${dark ? 'text-white' : 'text-gray-900'}`}>{s.title}</h2>
+          <p className={`text-[13.5px] mt-2 leading-relaxed ${dark ? 'text-slate-400' : 'text-gray-500'}`}>{s.body}</p>
+        </div>
+
+        {s.theme && (
+          <div className="px-5 py-3">
+            <div className="rounded-2xl overflow-hidden border border-black/10 shadow-inner flex h-28">
+              <button type="button" onClick={() => { setPick('light'); onThemeChange?.('light'); }}
+                className={`flex-1 relative flex flex-col items-center justify-center transition-all ${pick === 'light' ? 'ring-2 ring-inset ring-violet-500' : ''}`}
+                style={{ background: '#f8f9fa' }}>
+                <div className="w-14 h-9 rounded-md bg-white border border-gray-200 shadow-sm mb-1.5" />
+                <span className="text-[11px] font-bold text-gray-800">Light</span>
+              </button>
+              <button type="button" onClick={() => { setPick('dark'); onThemeChange?.('dark'); }}
+                className={`flex-1 relative flex flex-col items-center justify-center transition-all ${pick === 'dark' ? 'ring-2 ring-inset ring-violet-400' : ''}`}
+                style={{ backgroundImage: 'linear-gradient(180deg, #0c1222 0%, #151d33 100%)' }}>
+                <div className="w-14 h-9 rounded-md mb-1.5 border border-white/15"
+                  style={{ backgroundImage: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(16,24,40,0.9))' }} />
+                <span className="text-[11px] font-bold text-slate-200">Dark</span>
+              </button>
+            </div>
+            <p className={`text-[12px] mt-2 text-center ${dark ? 'text-slate-500' : 'text-gray-400'}`}>
+              Dark uses soft navy gradients — not flat black.
+            </p>
+          </div>
+        )}
+
+        {!s.theme && (
+          <div className="px-5 py-3">
+            <div className={`rounded-2xl p-4 text-[12.5px] leading-relaxed ${dark ? 'bg-white/5 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
+              {step === 1 && 'Tip: use search on Home to jump straight to an app.'}
+              {step === 2 && 'Tip: free apps install immediately; paid apps unlock after USDT payment.'}
+              {step === 3 && 'Tip: connect a wallet before checkout so payment can open in your browser extension.'}
+              {step === 0 && 'NexaStore is the marketplace. NexaPay handles USDT checkout on supported networks.'}
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 pb-5 pt-2 flex gap-2">
+          {step > 0 && (
+            <button type="button" onClick={() => setStep((x) => x - 1)}
+              className={`px-4 py-2.5 rounded-xl text-[13px] font-semibold ${dark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'}`}>
+              Back
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (!isLast) setStep((x) => x + 1);
+              else {
+                onThemeChange?.(pick);
+                onDone?.(pick);
+              }
+            }}
+            className="flex-1 py-2.5 rounded-xl text-[13px] font-bold text-white bg-gradient-to-r from-violet-600 to-emerald-600"
+          >
+            {isLast ? 'Start exploring' : 'Next'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 export default function NexaStoreRoot() {
   return (
