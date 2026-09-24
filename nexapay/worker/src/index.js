@@ -53,7 +53,7 @@ const NETWORKS = {
     name: "Base",
     chainId: 8453,
     chainIdHex: "0x2105",
-    usdt: "0xfde4c96c8593536e31f126d2f3f4e1f5cbb7bd8c",
+    usdt: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
     decimals: 6,
     nativeSymbol: "ETH",
     explorer: "https://basescan.org",

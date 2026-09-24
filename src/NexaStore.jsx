@@ -1916,7 +1916,7 @@ const NEXAPAY_NETWORKS = [
     name: 'Base',
     chainId: 8453,
     chainIdHex: '0x2105',
-    usdt: '0xfde4C96c8593536E31F126d2f3F4e1F5CBb7bD8c',
+    usdt: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2',
     decimals: 6,
     nativeSymbol: 'ETH',
     rpcUrls: ['https://mainnet.base.org'],
