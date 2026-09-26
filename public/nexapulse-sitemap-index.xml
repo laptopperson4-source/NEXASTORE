@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Small site: prefer submitting sitemap.xml directly. This index remains valid for older GSC entries. -->
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
-    <loc>https://app.nexapulse.pro/nexapulse-sitemap.xml</loc>
-    <lastmod>2026-09-08</lastmod>
-  </sitemap>
-  <sitemap>
     <loc>https://app.nexapulse.pro/sitemap.xml</loc>
-    <lastmod>2026-09-08</lastmod>
+    <lastmod>2026-09-27T00:00:00+01:00</lastmod>
   </sitemap>
 </sitemapindex>

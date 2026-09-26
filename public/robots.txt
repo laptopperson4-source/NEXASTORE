@@ -1,6 +1,28 @@
+# NexaStore · app.nexapulse.pro
+# https://developers.google.com/search/docs/crawling-indexing/robots/intro
+
 User-agent: *
 Allow: /
 
+# Do not block CSS/JS/images — Google needs them to render the SPA correctly
+Allow: /assets/
+Allow: /branding/
+Allow: /*.js$
+Allow: /*.css$
+Allow: /*.png$
+Allow: /*.svg$
+Allow: /*.webp$
+Allow: /*.jpg$
+Allow: /*.ico$
+
+# Thin / non-canonical / utility URLs — no need to spend crawl budget here
+Disallow: /nexapay-widget.html
+Disallow: /*?*portal=
+Disallow: /affiliates
+Disallow: /affiliates/
+
+# Host-level sitemap (one canonical file — avoid duplicate sitemap noise)
 Sitemap: https://app.nexapulse.pro/sitemap.xml
-Sitemap: https://app.nexapulse.pro/nexapulse-sitemap.xml
-Sitemap: https://app.nexapulse.pro/nexapulse-sitemap-index.xml
+
+# Bing / other engines also read this line
+# Primary submission path for Google is still Search Console → Sitemaps
