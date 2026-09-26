@@ -1594,7 +1594,7 @@ const pastelCategories = [
   { name: 'Developer', icon: Code, bg: 'bg-indigo-100', color: 'text-indigo-600' },
 ];
 
-function AuthModal({ onClose, onAuth }) {
+function AuthModal({ onClose, onAuth, dark = false }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -1654,20 +1654,20 @@ function AuthModal({ onClose, onAuth }) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm max-h-[92vh] overflow-y-auto shadow-2xl"
+        className={`rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm max-h-[92vh] overflow-y-auto shadow-2xl ${dark ? 'bg-[#121a2e] border border-white/10' : 'bg-white'}`}
         style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-extrabold text-gray-900">{mode === 'forgot' ? 'Reset password' : (isSignUp ? 'Create account' : 'Sign in')}</h2>
-          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
+          <h2 className={`text-xl font-extrabold ${dark ? 'text-white' : 'text-gray-900'}`}>{mode === 'forgot' ? 'Reset password' : (isSignUp ? 'Create account' : 'Sign in')}</h2>
+          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10 text-slate-400' : 'hover:bg-gray-100 text-gray-500'}`}>
             <X size={20} />
           </button>
         </div>
 
         <form onSubmit={mode === 'forgot' ? handleForgot : handleSubmit} className="space-y-4" autoComplete="on">
           <div>
-            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5" htmlFor="nexastore-auth-email">Email</label>
+            <label className={`block text-[13px] font-semibold mb-1.5 ${dark ? "text-slate-300" : "text-gray-700"}`} htmlFor="nexastore-auth-email">Email</label>
             <input
               id="nexastore-auth-email"
               name="email"
@@ -1681,13 +1681,13 @@ function AuthModal({ onClose, onAuth }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-[16px] sm:text-[14px] text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+              className={`w-full px-4 py-3 border rounded-xl text-[16px] sm:text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? "border-white/15 bg-white/5 text-slate-100 placeholder-slate-500" : "border-gray-200 text-gray-900 bg-white"}`}
             />
           </div>
 
           {mode !== 'forgot' && (
           <div>
-            <label className="block text-[13px] font-semibold text-gray-700 mb-1.5" htmlFor="nexastore-auth-password">Password</label>
+            <label className={`block text-[13px] font-semibold mb-1.5 ${dark ? "text-slate-300" : "text-gray-700"}`} htmlFor="nexastore-auth-password">Password</label>
             <div className="relative">
               <input
                 id="nexastore-auth-password"
@@ -1699,7 +1699,7 @@ function AuthModal({ onClose, onAuth }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl text-[16px] sm:text-[14px] text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className={`w-full px-4 py-3 pr-12 border rounded-xl text-[16px] sm:text-[14px] focus:outline-none focus:ring-2 focus:ring-violet-500 ${dark ? "border-white/15 bg-white/5 text-slate-100 placeholder-slate-500" : "border-gray-200 text-gray-900 bg-white"}`}
               />
               <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 p-1">
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -5918,7 +5918,15 @@ function DesktopRightSidebar({ topApps, latestApps, onOpenConsole }) {
   );
 }
 
-function DesktopApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
+function DesktopApp({
+  const hx = dark ? 'text-slate-100' : 'text-gray-900';
+  const sx = dark ? 'text-slate-400' : 'text-gray-500';
+  const pageBg = dark
+    ? { backgroundImage: 'radial-gradient(ellipse 80% 40% at 50% -15%, rgba(99,102,241,0.12), transparent 50%), linear-gradient(180deg, #0c1222 0%, #101828 50%, #0a101c 100%)' }
+    : { background: '#f8f9fa' };
+  const shell = dark ? 'bg-[#0e1526]/95 border-white/10' : 'bg-white border-gray-200';
+  const cardx = dark ? 'bg-white/[0.06] border border-white/10' : 'bg-white border border-gray-100';
+ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
   const [downloadApps, setDownloadApps] = useState(() => resolveDownloadApps(filteredApps));
   useEffect(() => {
     setDownloadApps(resolveDownloadApps(filteredApps));
@@ -5975,10 +5983,10 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
   }, [view, session, profile?.id, filteredApps]);
 
   return (
-    <div className="hidden md:flex min-h-screen bg-white w-full">
+    <div className={`hidden md:flex min-h-screen w-full ${dark ? "text-slate-100" : "text-gray-900"}`} style={pageBg}>
       <DesktopSidebar view={view} setView={setView} />
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-gray-100 sticky top-0 z-20">
+        <header className={`sticky top-0 z-20 border-b ${dark ? "bg-[#0e1526]/95 border-white/10" : "bg-white border-gray-100"}`}>
           <div className="px-8 py-4 flex items-center gap-6">
             <div className="flex-1 max-w-2xl">
               <div className="relative">
@@ -6000,7 +6008,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                     <UserAvatar profile={profile} size={36} />
                   </button>
                   {showProfileMenu && (
-                    <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-100 rounded-2xl shadow-lg p-3 z-30">
+                    <div className={`absolute right-0 mt-2 w-56 rounded-2xl shadow-lg p-3 z-30 border ${dark ? "bg-[#151d33] border-white/10" : "bg-white border-gray-100"}`}>
                       <p className="text-[13px] text-gray-500 px-2 pb-2 truncate">{profile.email}</p>
                       <button onClick={() => { setView('profile'); setShowProfileMenu(false); }} className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 text-[13.5px] font-semibold text-gray-800 flex items-center gap-2">
                         <User size={15} /> Profile
@@ -6035,7 +6043,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
                 <div className="mb-10">
                   <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-[19px] font-extrabold text-gray-900">Recommended for You</h2>
+                    <h2 className={`text-[19px] font-extrabold ${hx}`}>Recommended for You</h2>
                     <button onClick={() => setView('discover')} className="text-blue-600 font-semibold hover:text-blue-700 text-[13.5px]">View all</button>
                   </div>
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
@@ -6046,7 +6054,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                 </div>
 
                 <div className="mb-10">
-                  <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Top Categories</h2>
+                  <h2 className={`text-[19px] font-extrabold ${hx} mb-5`}>Top Categories</h2>
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
                     {categories.map(({ name, icon: Icon, count, bg, color }) => (
                       <button key={name} onClick={() => { setSelectedCategory(name); setView('categories'); }} className="flex flex-col items-center gap-2.5 py-4 rounded-2xl hover:bg-gray-50 transition-colors">
@@ -6054,7 +6062,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                           <Icon size={24} className={color} strokeWidth={2.1} />
                         </div>
                         <div className="text-center">
-                          <p className="font-bold text-[13.5px] text-gray-900">{name}</p>
+                          <p className={`font-bold text-[13.5px] ${hx}`}>{name}</p>
                           <p className="text-[11.5px] text-gray-400">{count} apps</p>
                         </div>
                       </button>
@@ -6064,7 +6072,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
                 <div>
                   <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-[19px] font-extrabold text-gray-900">New &amp; Updated</h2>
+                    <h2 className={`text-[19px] font-extrabold ${hx}`}>New &amp; Updated</h2>
                     <button onClick={() => setView('updates')} className="text-blue-600 font-semibold hover:text-blue-700 text-[13.5px]">View all</button>
                   </div>
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
@@ -6078,7 +6086,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
             {(view === 'discover' || view === 'charts') && (
               <div>
-                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">{viewTitles[view]}</h2>
+                <h2 className={`text-[19px] font-extrabold ${hx} mb-5`}>{viewTitles[view]}</h2>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-x-3 gap-y-5">
                   {filteredApps.map((app, i) => (
                     <AppCard key={app.id} app={app} index={i} onOpen={onOpenApp} onInstall={handleInstall} installState={installState} owned={isOwned?.(app)} dark={dark} />
@@ -6089,7 +6097,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
             {view === 'categories' && (
               <div>
-                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Categories</h2>
+                <h2 className={`text-[19px] font-extrabold ${hx} mb-5`}>Categories</h2>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-4 mb-9">
                   {categories.map(({ name, icon: Icon, count, bg, color }) => (
                     <button key={name} onClick={() => setSelectedCategory(selectedCategory === name ? null : name)}
@@ -6098,7 +6106,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
                         <Icon size={24} className={color} strokeWidth={2.1} />
                       </div>
                       <div className="text-center">
-                        <p className="font-bold text-[13.5px] text-gray-900">{name}</p>
+                        <p className={`font-bold text-[13.5px] ${hx}`}>{name}</p>
                         <p className="text-[11.5px] text-gray-400">{count} apps</p>
                       </div>
                     </button>
@@ -6114,14 +6122,14 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
             {view === 'updates' && (
               <div>
-                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Updates</h2>
+                <h2 className={`text-[19px] font-extrabold ${hx} mb-5`}>Updates</h2>
                 <div className="space-y-2">
                   {filteredApps.map((app, i) => {
                     return (
                       <div key={app.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50">
                         <SmallAppBadge app={app} size="w-11 h-11" themeClass={smallIconThemes[i % smallIconThemes.length]} />
                         <div className="flex-1 min-w-0">
-                          <p className="font-bold text-[14px] text-gray-900 truncate">{app.name}</p>
+                          <p className={`font-bold text-[14px] truncate ${hx}`}>{app.name}</p>
                           <p className="text-[12.5px] text-gray-400">Version {app.version || '1.0.0'}</p>
                         </div>
                         <button className="text-blue-600 font-bold text-[13.5px] hover:text-blue-700">Update</button>
@@ -6134,7 +6142,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
             {view === 'profile' && (
               <div>
-                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5">Profile</h2>
+                <h2 className={`text-[19px] font-extrabold ${hx} mb-5`}>Profile</h2>
                 <ProfileView
                   onProfileUpdated={onProfileUpdated}
                                                       session={session}
@@ -6155,7 +6163,7 @@ function DesktopApp({ view, setView, session, profile, filteredApps, search, set
 
             {libraryViews.includes(view) && (
               <div>
-                <h2 className="text-[19px] font-extrabold text-gray-900 mb-5 capitalize">{view === 'myapps' ? 'My Apps' : view}</h2>
+                <h2 className={`text-[19px] font-extrabold ${hx} mb-5 capitalize`}>{view === 'myapps' ? 'My Apps' : view}</h2>
                 {view === 'wishlist' && wishlistLoading && (
                   <p className="text-center py-16 text-gray-400 text-sm">Loading your wishlist…</p>
                 )}
@@ -6250,7 +6258,12 @@ function MobileBottomNav({ view, setView, dark = false }) {
   );
 }
 
-function MobileApp({ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
+function MobileApp({
+  const hx = dark ? 'text-slate-100' : 'text-gray-900';
+  const sx = dark ? 'text-slate-400' : 'text-gray-500';
+  const cardx = dark ? 'bg-white/[0.07] border border-white/10' : 'bg-white';
+  const chipx = dark ? 'bg-white/10 text-slate-200' : 'bg-white';
+ view, setView, session, profile, filteredApps, search, setSearch, loading, handleInstall, categories, onOpenAuth, onSignOut, onOpenDeveloper, onOpenApp, onOpenAdmin, installState, isOwned, wallet, onConnectWallet, onDisconnectWallet, onOpenTutorials, onOpenTutorial, onProfileUpdated, dark = false, setTheme }) {
   const [chartTab, setChartTab] = useState('Apps');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -6329,7 +6342,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               placeholder="Search apps"
               className="flex-1 min-w-0 bg-transparent text-[14px] text-gray-800 placeholder:text-gray-400 outline-none"
             />
-            <button type="button" onClick={() => setView('updates')} className="p-1 text-gray-500 shrink-0" aria-label="Updates">
+            <button type="button" onClick={() => setView('updates')} className={`p-1 shrink-0 ${sx}`} aria-label="Updates">
               <Bell size={20} />
             </button>
             {session && profile ? (
@@ -6353,7 +6366,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
           <div className="px-4 mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-[16px] font-extrabold text-gray-900">Recommended for You</h2>
+              <h2 className={`text-[16px] font-extrabold ${hx}`}>Recommended for You</h2>
               <button onClick={() => setView('charts')} className="text-emerald-700 text-[12.5px] font-semibold">See all</button>
             </div>
             <div className="grid grid-cols-3 gap-x-3 gap-y-5">
@@ -6365,7 +6378,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
           <div className="px-4 mb-7">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-[16px] font-extrabold text-gray-900">Top Categories</h2>
+              <h2 className={`text-[16px] font-extrabold ${hx}`}>Top Categories</h2>
               <button onClick={() => setView('categories')} className="text-emerald-700 text-[12.5px] font-semibold">See all</button>
             </div>
             <div className="grid grid-cols-3 gap-1">
@@ -6380,13 +6393,13 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
           <div className="px-4 mb-8">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-[16px] font-extrabold text-gray-900">Top Charts</h2>
+              <h2 className={`text-[16px] font-extrabold ${hx}`}>Top Charts</h2>
               <button onClick={() => setView('charts')} className="text-emerald-700 text-[12.5px] font-semibold">See all</button>
             </div>
-            <div className="bg-white rounded-full p-1 flex mb-4 w-fit">
+            <div className={`rounded-full p-1 flex mb-4 w-fit ${chipx}`}>
               {['Apps', 'Games', 'Tools'].map(tab => (
                 <button key={tab} onClick={() => setChartTab(tab)}
-                  className={`px-4 py-1.5 rounded-full text-[12.5px] font-semibold transition-colors ${chartTab === tab ? 'bg-gradient-to-r from-violet-500 to-indigo-600 text-gray-900' : 'text-gray-500'}`}>
+                  className={`px-4 py-1.5 rounded-full text-[12.5px] font-semibold transition-colors ${chartTab === tab ? 'bg-gradient-to-r from-violet-500 to-indigo-600 text-white' : sx}`}>
                   {tab}
                 </button>
               ))}
@@ -6395,11 +6408,11 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
               {filteredApps.slice(0, 5).map((app, i) => {
                 return (
                   <div key={app.id} onClick={() => onOpenApp(app)} className="w-full flex items-center gap-3 text-left cursor-pointer">
-                    <span className="text-[13px] font-bold text-gray-500 w-4">{i + 1}</span>
+                    <span className={`text-[13px] font-bold ${sx} w-4`}>{i + 1}</span>
                     <SmallAppBadge app={app} size="w-10 h-10" themeClass={smallIconThemes[i % smallIconThemes.length]} />
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[13.5px] text-gray-900 truncate leading-tight">{app.name}</p>
-                      <p className="text-[11.5px] text-gray-500 truncate">{app.category}</p>
+                      <p className={`font-bold text-[13.5px] ${hx} truncate leading-tight`}>{app.name}</p>
+                      <p className={`text-[11.5px] ${sx} truncate`}>{app.category}</p>
                     </div>
                     {app.rating ? (
                       <span className="text-yellow-400 text-[12.5px] font-semibold flex items-center gap-1">
@@ -6416,7 +6429,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
       {view === 'categories' && (
         <div className="px-4 mb-8">
-          <h2 className="text-[16px] font-extrabold text-gray-900 mb-4">Categories</h2>
+          <h2 className={`text-[16px] font-extrabold ${hx} mb-4`}>Categories</h2>
           <div className="grid grid-cols-3 gap-1 mb-6">
             {categories.map((cat) => (
               <button key={cat.name} onClick={() => setSelectedCategory(selectedCategory === cat.name ? null : cat.name)}
@@ -6435,16 +6448,16 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
       {view === 'charts' && (
         <div className="px-4 mb-8">
-          <h2 className="text-[16px] font-extrabold text-gray-900 mb-4">Top Charts</h2>
+          <h2 className={`text-[16px] font-extrabold ${hx} mb-4`}>Top Charts</h2>
           <div className="space-y-3">
             {filteredApps.map((app, i) => {
               return (
                 <div key={app.id} onClick={() => onOpenApp(app)} className="w-full flex items-center gap-3 text-left cursor-pointer">
-                  <span className="text-[13px] font-bold text-gray-500 w-4">{i + 1}</span>
+                  <span className={`text-[13px] font-bold ${sx} w-4`}>{i + 1}</span>
                   <SmallAppBadge app={app} size="w-10 h-10" themeClass={smallIconThemes[i % smallIconThemes.length]} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-[13.5px] text-gray-900 truncate leading-tight">{app.name}</p>
-                    <p className="text-[11.5px] text-gray-500 truncate">{app.category}</p>
+                    <p className={`font-bold text-[13.5px] ${hx} truncate leading-tight`}>{app.name}</p>
+                    <p className={`text-[11.5px] ${sx} truncate`}>{app.category}</p>
                   </div>
                   {app.rating ? (
                     <span className="text-yellow-400 text-[12.5px] font-semibold flex items-center gap-1">
@@ -6460,15 +6473,15 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
       {view === 'updates' && (
         <div className="px-4 mb-8">
-          <h2 className="text-[16px] font-extrabold text-gray-900 mb-4">Updates</h2>
+          <h2 className={`text-[16px] font-extrabold ${hx} mb-4`}>Updates</h2>
           <div className="space-y-3">
             {filteredApps.map((app, i) => {
               return (
                 <div key={app.id} onClick={() => onOpenApp(app)} className="w-full flex items-center gap-3 text-left cursor-pointer">
                   <SmallAppBadge app={app} size="w-10 h-10" themeClass={smallIconThemes[i % smallIconThemes.length]} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-[13.5px] text-gray-900 truncate leading-tight">{app.name}</p>
-                    <p className="text-[11.5px] text-gray-500">Version {app.version || '1.0.0'}</p>
+                    <p className={`font-bold text-[13.5px] ${hx} truncate leading-tight`}>{app.name}</p>
+                    <p className={`text-[11.5px] ${sx}`}>Version {app.version || '1.0.0'}</p>
                   </div>
                   <button onClick={(e) => e.stopPropagation()} className="text-emerald-700 font-bold text-[12.5px]">Update</button>
                 </div>
@@ -6480,15 +6493,15 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
 
       {view === 'library' && (
         <div className="px-4 mb-8">
-          <h2 className="text-[16px] font-extrabold text-gray-900 mb-4">Library</h2>
+          <h2 className={`text-[16px] font-extrabold ${hx} mb-4`}>Library</h2>
           <div className="space-y-2">
             {libraryMenu.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setView(id)} className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl bg-white hover:bg-gray-100 transition-colors">
-                <span className="flex items-center gap-3 text-gray-900 font-semibold text-[14px]">
+              <button key={id} onClick={() => setView(id)} className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl transition-colors ${cardx} ${dark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}>
+                <span className={`flex items-center gap-3 font-semibold text-[14px] ${hx}`}>
                   <Icon size={19} strokeWidth={2.1} className="text-emerald-700" />
                   {label}
                 </span>
-                <ChevronRight size={17} className="text-gray-500" />
+                <ChevronRight size={17} className={sx} />
               </button>
             ))}
 
@@ -6499,9 +6512,9 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
       
       {view === 'profile' && (
         <div className="mb-8">
-          <div className="relative px-4 pt-3 pb-6 bg-white border-b border-gray-100">
+          <div className={`relative px-4 pt-3 pb-6 border-b ${dark ? "bg-white/[0.04] border-white/10" : "bg-white border-gray-100"}`}>
             <div className="flex items-center justify-between h-10">
-              <span className="text-[15px] font-bold text-gray-900">Profile</span>
+              <span className={`text-[15px] font-bold ${hx}`}>Profile</span>
               <div className="relative">
                 <button
                   type="button"
@@ -6512,7 +6525,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
                   <MoreVertical size={22} />
                 </button>
                 {showProfileMenu && (
-                  <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 z-40">
+                  <div className={`absolute right-0 mt-1 w-56 rounded-2xl shadow-xl p-2 border z-40 ${dark ? "bg-[#151d33] border-white/10" : "bg-white border-gray-100"}`}
                     {session && profile ? (
                       <>
                         <p className="text-[11px] text-gray-500 px-2 py-1.5 truncate">{profile.email}</p>
@@ -6551,7 +6564,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
                   <User size={40} strokeWidth={1.8} />
                 </div>
               )}
-              <p className="mt-3 text-[20px] font-extrabold text-gray-900 text-center px-4">
+              <p className={`mt-3 text-[20px] font-extrabold text-center px-4 ${hx}`}>
                 {session && profile ? displayName : 'Guest'}
               </p>
               {session && profile?.email && (
@@ -6607,7 +6620,7 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
                 <EmptyLibraryState view="downloads" session={session} onOpenAuth={onOpenAuth} onOpenDeveloper={onOpenDeveloper} dark={dark} />
               ) : (
                 (downloadApps || []).map((app, i) => (
-                  <div key={app.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white border border-gray-100">
+                  <div key={app.id} className={`flex items-center gap-3 p-3 rounded-2xl border ${dark ? "bg-white/[0.06] border-white/10" : "bg-white border-gray-100"}`}
                     <button type="button" className="flex items-center gap-3 flex-1 min-w-0 text-left" onClick={() => onOpenApp(app)}>
                       {app.logo_url ? (
                         <img src={app.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
@@ -6615,8 +6628,8 @@ function MobileApp({ view, setView, session, profile, filteredApps, search, setS
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex-shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="font-bold text-[14px] text-gray-900 truncate">{app.name}</p>
-                        <p className="text-[11.5px] text-gray-500">
+                        <p className={`font-bold text-[14px] truncate ${hx}`}>{app.name}</p>
+                        <p className={`text-[11.5px] ${sx}`}>
                           {app.downloadedAt ? `Downloaded ${new Date(app.downloadedAt).toLocaleDateString()}` : 'Downloaded'}
                         </p>
                       </div>
@@ -7186,40 +7199,40 @@ function NexaStore() {
     <div style={{ fontFamily: "'Inter', sans-serif", ...(dark ? { background: '#0a101c', minHeight: '100vh' } : {}) }}>
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} />}
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} dark={dark} />}
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={dark} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
           <div className="hidden md:block">
-            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={false} showToast={showToast} onProfileUpdated={setProfile} />
+            <DevConsole session={session} profile={profile} onClose={() => setShowDevConsole(false)} onPublished={refreshApps} dark={dark} showToast={showToast} onProfileUpdated={setProfile} />
           </div>
         </>
       )}
       {showAdmin && session && profile && profile.is_owner && (
         <>
           <div className="md:hidden">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={false} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={dark} showToast={showToast} />
           </div>
           <div className="hidden md:block">
-            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={false} showToast={showToast} />
+            <AdminDashboard session={session} profile={profile} onClose={() => { setShowAdmin(false); refreshApps(); }} dark={dark} showToast={showToast} />
           </div>
         </>
       )}
       {selectedApp && (
         <>
           <div className="md:hidden">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={false} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={dark} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
           <div className="hidden md:block">
-            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={false} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
+            <AppDetailModal app={selectedApp} session={session} profile={profile} onClose={() => setSelectedApp(null)} onInstall={handleInstall} onOpenAuth={() => setShowAuthModal(true)} dark={dark} installState={installState} showToast={showToast} owned={isOwned(selectedApp)} />
           </div>
         </>
       )}
       {showWalletModal && (
         <WalletSetupModal
-          dark={false}
+          dark={dark}
           onClose={() => setShowWalletModal(false)}
           onConnected={(w) => {
             setWallet(w);
@@ -7234,7 +7247,7 @@ function NexaStore() {
           session={session}
           profile={profile}
           wallet={wallet}
-          dark={false}
+          dark={dark}
           onClose={() => setPayApp(null)}
           onNeedWallet={() => setShowWalletModal(true)}
           onOpenTutorials={openTutorialHub}
@@ -7249,14 +7262,14 @@ function NexaStore() {
       )}
       {showTutorialHub && !activeTutorial && (
         <TutorialHub
-          dark={false}
+          dark={dark}
           onClose={() => setShowTutorialHub(false)}
           onOpenTutorial={(tut) => { setActiveTutorial(tut); setShowTutorialHub(false); }}
         />
       )}
       {activeTutorial && (
         <TutorialViewer
-          dark={false}
+          dark={dark}
           tutorial={activeTutorial}
           onBack={() => { setActiveTutorial(null); setShowTutorialHub(true); }}
           onClose={() => { setActiveTutorial(null); setShowTutorialHub(false); }}
@@ -7284,7 +7297,7 @@ function NexaStore() {
           onThemeChange={(mode) => setTheme(mode)}
           onDone={(mode) => {
             if (mode) setTheme(mode);
-            markOnboardingDone(profile?.id);
+            markOnboardingDone(profile?.id || session?.user?.id);
             setShowOnboarding(false);
           }}
         />
