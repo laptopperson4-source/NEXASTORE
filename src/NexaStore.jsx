@@ -7164,6 +7164,7 @@ function NexaStore() {
     pathName === '' ||
     /^\/affiliates\/?$/i.test(pathName) ||
     /^\/(about|payments|terms|privacy|contact|studio|app|tutorials)(\/|$)/i.test(pathName) ||
+    pathName.startsWith('/error') ||
     pathName.startsWith('/index') ||
     pathName.endsWith('.html') ||
     pathName.endsWith('.txt') ||
@@ -7172,22 +7173,13 @@ function NexaStore() {
     pathName.endsWith('.png') ||
     pathName.endsWith('.svg') ||
     pathName.endsWith('.ico');
-  // Soft in-app 404 for unknown SPA paths (static 404.html still used by host for hard 404s)
+  // Soft in-app 404 — outline style (matches /error/404 and public/404.html)
   if (typeof window !== 'undefined' && !isKnownPath && !pathName.match(/^\/?$/)) {
-    return (
-      <div className="min-h-screen bg-[#f8f9fa] flex items-center justify-center p-6" style={{ fontFamily: "'Inter', sans-serif" }}>
-        <div className="max-w-md w-full text-center bg-white border border-gray-200 rounded-3xl p-8 shadow-sm">
-          <p className="text-5xl font-extrabold bg-gradient-to-r from-violet-600 to-emerald-600 bg-clip-text text-transparent">404</p>
-          <h1 className="text-[18px] font-extrabold text-gray-900 mt-3">This page doesn’t exist</h1>
-          <p className="text-[13.5px] text-gray-500 mt-2 leading-relaxed">
-            The link may be broken or outdated. Return to the store to keep browsing.
-          </p>
-          <a href="/" className="inline-flex mt-6 px-5 py-2.5 rounded-full bg-emerald-600 text-white text-[13.5px] font-bold">
-            Back to NexaStore
-          </a>
-        </div>
-      </div>
-    );
+    // Prefer dedicated error page for full illustration
+    if (!pathName.startsWith('/error')) {
+      window.location.replace('/error/404/');
+      return null;
+    }
   }
 
   // Affiliates removed — old /affiliates links go home
