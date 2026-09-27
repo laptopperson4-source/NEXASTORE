@@ -7173,13 +7173,43 @@ function NexaStore() {
     pathName.endsWith('.png') ||
     pathName.endsWith('.svg') ||
     pathName.endsWith('.ico');
-  // Soft in-app 404 — outline style (matches /error/404 and public/404.html)
+  // Soft in-app 404 — outline UFO (matches static error pages)
   if (typeof window !== 'undefined' && !isKnownPath && !pathName.match(/^\/?$/)) {
-    // Prefer dedicated error page for full illustration
-    if (!pathName.startsWith('/error')) {
-      window.location.replace('/error/404/');
-      return null;
-    }
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-5 py-12" style={{ background: '#faf8f5', color: '#1e2433', fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div className="w-full max-w-[420px] text-center">
+          <div className="mx-auto mb-2.5 w-8 h-8 rounded-full border-2 border-[#1e2433]" />
+          <p className="text-[13px] font-semibold text-gray-500 mb-3">NexaStore</p>
+          <p className="text-[3rem] font-extrabold tracking-tight leading-none text-[#1e2433]">404</p>
+          <h1 className="text-[1.25rem] font-bold mt-3 mb-2 text-[#1e2433]">This page doesn’t exist</h1>
+          <p className="text-[0.9rem] text-gray-500 leading-relaxed max-w-[34ch] mx-auto">
+            The link may be broken, or this page drifted off the map. Head home and keep browsing apps.
+          </p>
+          <div className="my-8 mx-auto w-full max-w-[300px]" aria-hidden="true">
+            <svg viewBox="0 0 300 220" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="#1e2433" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-full h-auto">
+              <ellipse cx="80" cy="170" rx="70" ry="20" /><ellipse cx="200" cy="167" rx="80" ry="22" />
+              <ellipse cx="145" cy="169" rx="50" ry="14" /><ellipse cx="145" cy="174" rx="35" ry="8" />
+              <ellipse cx="145" cy="119" rx="60" ry="19" transform="rotate(-16 145 119)" />
+              <ellipse cx="142" cy="98" rx="24" ry="16" transform="rotate(-16 142 98)" />
+              <ellipse cx="120" cy="116" rx="5" ry="4" /><ellipse cx="140" cy="114" rx="5" ry="4" /><ellipse cx="160" cy="116" rx="5" ry="4" />
+              <path d="M155 85 L170 58 L182 64" /><circle cx="182.5" cy="59.5" r="4.5" />
+              <path d="M105 125 L90 158" /><path d="M170 128 L188 155" />
+              <ellipse cx="90" cy="159.5" rx="8" ry="3.5" /><ellipse cx="188" cy="155.5" rx="8" ry="3.5" />
+              <ellipse cx="76" cy="80" rx="11" ry="8" /><ellipse cx="85" cy="64" rx="7" ry="6" /><ellipse cx="58" cy="68" rx="6" ry="6" />
+              <path d="M40 165 V125" /><path d="M40 145 L28 135" /><path d="M40 140 L52 130" />
+              <circle cx="31.5" cy="29.5" r="1.5" /><circle cx="231.5" cy="37.5" r="1.5" />
+              <circle cx="256" cy="23" r="1.25" /><circle cx="201" cy="19" r="1.25" />
+            </svg>
+          </div>
+          <a href="/" className="inline-flex items-center justify-center min-w-[180px] px-[22px] py-3 rounded-full border-2 border-[#1e2433] bg-[#f3f1ed] text-[#1e2433] text-[14px] font-semibold no-underline hover:bg-[#e8e4dc]">
+            Back to NexaStore
+          </a>
+          <a href="mailto:help@nexapulse.pro" className="block mt-4 text-xs font-medium text-gray-500 no-underline hover:text-[#1e2433]">
+            Contact support
+          </a>
+        </div>
+      </div>
+    );
   }
 
   // Affiliates removed — old /affiliates links go home
