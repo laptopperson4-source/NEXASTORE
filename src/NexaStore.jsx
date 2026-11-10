@@ -389,7 +389,188 @@ async function restoreSession() {
    localStorage (and best-effort to a purchases
    table if it exists on Supabase).
    ============================================ */
+
 const WALLET_KEY = 'nexastore_crypto_wallet';
+/** Managed NexaStore buyer wallet (EVM). Private key never sent to server — encrypted in localStorage. */
+const MANAGED_WALLET_KEY = 'nexastore_managed_wallet_v1';
+
+async function loadEthersLib() {
+  if (typeof window !== 'undefined' && window.ethers?.Wallet) return window.ethers;
+  await new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('No window'));
+    if (window.ethers?.Wallet) return resolve();
+    const existing = document.querySelector('script[data-nexastore-ethers]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', () => reject(new Error('ethers load failed')));
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js';
+    s.async = true;
+    s.dataset.nexastoreEthers = '1';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load wallet library'));
+    document.head.appendChild(s);
+  });
+  if (!window.ethers?.Wallet) throw new Error('Wallet library unavailable');
+  return window.ethers;
+}
+
+function bufToB64(buf) {
+  const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
+  let s = '';
+  bytes.forEach((b) => { s += String.fromCharCode(b); });
+  return btoa(s);
+}
+function b64ToBuf(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+async function deriveAesKey(password, salt) {
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptPrivateKey(privateKey, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveAesKey(password, salt);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(privateKey));
+  return {
+    v: 1,
+    salt: bufToB64(salt),
+    iv: bufToB64(iv),
+    data: bufToB64(ct),
+  };
+}
+
+async function decryptPrivateKey(blob, password) {
+  if (!blob?.salt || !blob?.iv || !blob?.data) throw new Error('No encrypted key');
+  const key = await deriveAesKey(password, new Uint8Array(b64ToBuf(blob.salt)));
+  const pt = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(blob.iv)) },
+    key,
+    b64ToBuf(blob.data)
+  );
+  return new TextDecoder().decode(pt);
+}
+
+function readManagedWalletRecord() {
+  try {
+    const raw = localStorage.getItem(MANAGED_WALLET_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeManagedWalletRecord(rec) {
+  try {
+    localStorage.setItem(MANAGED_WALLET_KEY, JSON.stringify(rec));
+  } catch {}
+}
+
+/**
+ * Create a new EVM wallet for the buyer (MetaMask-compatible address format).
+ * This is NOT creating an account inside the MetaMask app — it generates a keypair
+ * the user can later import into MetaMask. Private key stays on-device, encrypted.
+ */
+async function createNexaStoreWallet({ userId, email, password, accessToken }) {
+  const ethers = await loadEthersLib();
+  const w = ethers.Wallet.createRandom();
+  const address = w.address;
+  const privateKey = w.privateKey;
+  const mnemonic = w.mnemonic?.phrase || null;
+  const encrypted = password
+    ? await encryptPrivateKey(privateKey, password)
+    : null;
+
+  const record = {
+    userId: userId || null,
+    email: email || null,
+    address,
+    provider: 'nexastore',
+    name: 'NexaStore Wallet',
+    createdAt: Date.now(),
+    encrypted,
+    // mnemonic only kept until user dismisses backup UI (also in session flag)
+    _mnemonicOnce: mnemonic,
+  };
+  writeManagedWalletRecord({
+    userId: record.userId,
+    email: record.email,
+    address: record.address,
+    provider: record.provider,
+    name: record.name,
+    createdAt: record.createdAt,
+    encrypted: record.encrypted,
+  });
+
+  // Link as default checkout wallet on this device
+  setStoredWallet({
+    provider: 'nexastore',
+    name: 'NexaStore Wallet',
+    address,
+    connectedAt: Date.now(),
+    managed: true,
+  });
+
+  // Public address only on profile (never private key)
+  if (accessToken && userId) {
+    try {
+      await sbUpdate(
+        'profiles',
+        { nexastore_wallet: address, buyer_wallet: address },
+        { id: userId },
+        accessToken
+      );
+    } catch {
+      try {
+        await sbUpdate('profiles', { nexastore_wallet: address }, { id: userId }, accessToken);
+      } catch {
+        /* columns may not exist yet — SQL migration provided */
+      }
+    }
+  }
+
+  return { address, mnemonic, privateKey };
+}
+
+/** Ensure current user has a managed wallet; create if missing. */
+async function ensureNexaStoreWallet({ userId, email, password, accessToken }) {
+  const existing = readManagedWalletRecord();
+  if (existing?.address && (!userId || !existing.userId || existing.userId === userId)) {
+    setStoredWallet({
+      provider: existing.provider || 'nexastore',
+      name: existing.name || 'NexaStore Wallet',
+      address: existing.address,
+      connectedAt: existing.createdAt || Date.now(),
+      managed: true,
+    });
+    if (accessToken && userId) {
+      try {
+        await sbUpdate('profiles', { nexastore_wallet: existing.address }, { id: userId }, accessToken);
+      } catch { /* ignore */ }
+    }
+    return { address: existing.address, created: false, mnemonic: null };
+  }
+  const created = await createNexaStoreWallet({ userId, email, password, accessToken });
+  return { address: created.address, created: true, mnemonic: created.mnemonic, privateKey: created.privateKey };
+}
+
+// legacy key still used by getStoredWallet
+const WALLET_KEY_LEGACY = 'nexastore_crypto_wallet';
 
 const PURCHASES_KEY = 'nexastore_purchases';
 
@@ -470,11 +651,11 @@ function findTutorial(tutorials, tutorialId, walletName) {
 
 
 function getStoredWallet() {
-  try { return JSON.parse(localStorage.getItem(WALLET_KEY) || 'null'); } catch { return null; }
+  try { return JSON.parse(localStorage.getItem(WALLET_KEY_LEGACY) || 'null'); } catch { return null; }
 }
 function setStoredWallet(w) {
-  if (w) localStorage.setItem(WALLET_KEY, JSON.stringify(w));
-  else localStorage.removeItem(WALLET_KEY);
+  if (w) localStorage.setItem(WALLET_KEY_LEGACY, JSON.stringify(w));
+  else localStorage.removeItem(WALLET_KEY_LEGACY);
 }
 function getPurchases() {
   try { return JSON.parse(localStorage.getItem(PURCHASES_KEY) || '{}'); } catch { return {}; }
@@ -1594,7 +1775,55 @@ const pastelCategories = [
   { name: 'Developer', icon: Code, bg: 'bg-indigo-100', color: 'text-indigo-600' },
 ];
 
-function AuthModal({ onClose, onAuth, dark = false }) {
+
+function WalletBackupModal({ walletInfo, onClose, dark = false }) {
+  const [copied, setCopied] = useState('');
+  if (!walletInfo?.address) return null;
+  const copy = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied(''), 2000);
+    } catch {}
+  };
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[260] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className={`w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl ${dark ? 'bg-[#121a2b] text-slate-100' : 'bg-white text-gray-900'}`}>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-600">NexaStore Wallet</p>
+            <h2 className="text-lg font-extrabold mt-1">Save your recovery phrase</h2>
+          </div>
+          <button type="button" onClick={onClose} className={`p-2 rounded-lg ${dark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X size={18} /></button>
+        </div>
+        <p className={`text-[13px] leading-relaxed mb-4 ${dark ? 'text-slate-400' : 'text-gray-500'}`}>
+          We created an EVM wallet for you (same address style as MetaMask) and linked it for checkout.
+          This is <strong>not</strong> a MetaMask account inside the MetaMask app — write down the phrase so you can import it into MetaMask later. We never store your private key on our servers.
+        </p>
+        <div className={`rounded-2xl p-3 mb-3 border ${dark ? 'border-white/10 bg-black/30' : 'border-gray-200 bg-gray-50'}`}>
+          <p className={`text-[11px] font-semibold mb-1 ${dark ? 'text-slate-400' : 'text-gray-500'}`}>Address</p>
+          <p className="text-[12px] font-mono break-all">{walletInfo.address}</p>
+          <button type="button" onClick={() => copy(walletInfo.address, 'addr')} className="mt-2 text-[12px] font-semibold text-violet-600">{copied === 'addr' ? 'Copied' : 'Copy address'}</button>
+        </div>
+        {walletInfo.mnemonic && (
+          <div className={`rounded-2xl p-3 mb-3 border ${dark ? 'border-amber-500/30 bg-amber-500/10' : 'border-amber-200 bg-amber-50'}`}>
+            <p className={`text-[11px] font-semibold mb-1 ${dark ? 'text-amber-200' : 'text-amber-800'}`}>Secret recovery phrase (shown once)</p>
+            <p className="text-[13px] font-mono leading-relaxed">{walletInfo.mnemonic}</p>
+            <button type="button" onClick={() => copy(walletInfo.mnemonic, 'mn')} className="mt-2 text-[12px] font-semibold text-violet-600">{copied === 'mn' ? 'Copied' : 'Copy phrase'}</button>
+          </div>
+        )}
+        <p className={`text-[11px] mb-4 ${dark ? 'text-slate-500' : 'text-gray-400'}`}>
+          Your wallet starts empty. You still need USDT (+ a little POL for gas on Polygon) before paying for apps. Card on-ramp can be added later.
+        </p>
+        <button type="button" onClick={onClose} className="w-full py-3 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-500">
+          I’ve saved it — continue
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AuthModal({ onClose, onAuth, dark = false, onWalletCreated }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -1638,7 +1867,29 @@ function AuthModal({ onClose, onAuth, dark = false }) {
         }
         return;
       }
-      onAuth(session.access_token ? session : { access_token: token, refresh_token: result.refresh_token, expires_in: result.expires_in });
+      const sess = session.access_token ? session : { access_token: token, refresh_token: result.refresh_token, expires_in: result.expires_in };
+      // Auto-create / link NexaStore EVM wallet (MetaMask-compatible address)
+      try {
+        const user = await sbGetProfile(token).catch(() => null);
+        const uid = user?.id || result?.user?.id || null;
+        const ensured = await ensureNexaStoreWallet({
+          userId: uid,
+          email: email.trim(),
+          password: isSignUp ? password : password,
+          accessToken: token,
+        });
+        if (ensured?.created && (ensured.mnemonic || ensured.privateKey)) {
+          onWalletCreated?.({
+            address: ensured.address,
+            mnemonic: ensured.mnemonic,
+            privateKey: ensured.privateKey,
+          });
+        }
+      } catch (walletErr) {
+        console.warn('NexaStore wallet setup:', walletErr);
+        // Do not block login if wallet lib fails
+      }
+      onAuth(sess);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -6765,6 +7016,8 @@ function AffiliatePortal({ session, profile, paidApps, showToast, onAuth, onSign
             setShowAuth(false);
             onSessionFromAuth?.(sess);
           }}
+          onWalletCreated={(info) => onWalletCreated?.(info)}
+          dark={dark}
         />
       )}
     </div>
@@ -6832,6 +7085,7 @@ function NexaStore() {
   const [fatalError, setFatalError] = useState(null);
   const [installState, setInstallState] = useState(null);
   const [wallet, setWallet] = useState(() => getStoredWallet());
+  const [walletBackup, setWalletBackup] = useState(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [payApp, setPayApp] = useState(null);
   const [ownedTick, setOwnedTick] = useState(0); // force re-render after purchase
@@ -7109,6 +7363,19 @@ function NexaStore() {
           prof = await linkVisitorIdToProfile(prof, token);
           setProfile(prof);
           showToast(`Signed in as ${prof.email || user.email}`, 'success');
+          // Link managed wallet for returning users (create if missing)
+          try {
+            const ensured = await ensureNexaStoreWallet({
+              userId: user.id,
+              email: user.email,
+              password: null,
+              accessToken: token,
+            });
+            setWallet(getStoredWallet());
+            if (ensured?.created && ensured.mnemonic) {
+              setWalletBackup({ address: ensured.address, mnemonic: ensured.mnemonic, privateKey: ensured.privateKey });
+            }
+          } catch (we) { console.warn('wallet ensure', we); }
         } catch (e) {
           let prof = mergeDevProfile({ id: user.id, email: user.email, is_owner: false });
           prof = await linkVisitorIdToProfile(prof, token);
@@ -7221,7 +7488,24 @@ function NexaStore() {
     <div style={{ fontFamily: "'Inter', sans-serif", ...(dark ? { background: '#0a101c', minHeight: '100vh' } : {}) }}>
       <MobileApp {...shared} />
       <DesktopApp {...shared} />
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onAuth={handleAuth} dark={dark} />}
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onAuth={handleAuth}
+          dark={dark}
+          onWalletCreated={(info) => {
+            setWalletBackup(info);
+            setWallet(getStoredWallet());
+          }}
+        />
+      )}
+      {walletBackup && (
+        <WalletBackupModal
+          walletInfo={walletBackup}
+          dark={dark}
+          onClose={() => setWalletBackup(null)}
+        />
+      )}
       {showDevConsole && session && profile && (
         <>
           <div className="md:hidden">
